@@ -1,5 +1,7 @@
 import math
-
+import os
+import sys
+sys.path.insert(0, os.path.abspath('.'))
 import numpy as np
 import torch
 import cv2
@@ -10,10 +12,7 @@ from utils.top_down_eval import pose_pck_accuracy
 # sys.path.insert(0, os.path.abspath('..' + '/'))
 # print(sys.path)
 
-# from models.RKNet_SPP import RegionKeypointNetwork_SPP as Network
-# from models.RKNet_mask_ca1 import RegionKeypointNetwork_1 as Network
-# from models.RKNet_Attention import RKNet_attention as Network
-from models.RKNet_Bulat import RegionKeypointNetwork_Bulat as Network
+from models.hourglass_SA import HourglassNet_SA as Network
 from data import get_dataset
 from config.config import DATASET, config_dict as cfg
 from utils.training_kits import load_pretrained_state
@@ -40,7 +39,7 @@ class TestPreds:
         if checkpoint != "":
             print("loading state dict...")
             save_dict = torch.load(checkpoint, map_location=self.device)
-            self.model.load_state_dict(save_dict["model_state"])
+            self.model.load_state_dict(save_dict["state_dict"])
             # state, is_match = load_pretrained_state(self.model.state_dict(), save_dict['model_state'])
             # self.model.load_state_dict(state)
             print("done!")
@@ -207,12 +206,8 @@ class TestPreds:
 
 if __name__ == '__main__':
     new_size = cfg["image_size"][0]
-    # path = "../record/handnet3_2/2021-09-13/0.716_mPCK_647epoch.pt"
-    # path = "../record/handnet3_3/2021-09-13/0.669_mPCK_173epoch.pt"
-    # path = "../record/handnet3_1/2021-09-20/0.8_mPCK_86epoch.pt"
-    # path = "../record/handnet3_mpii_1/2021-10-15/0.959_mPCK_163epoch.pt"
-    # path = "../record/handnet3_mask_ca2_7/2021-10-26/0.615_ap_200epoch.pt"
-    path = "../record/handnet3_mask_ca2_6/2021-11-15/0.078_ap_360epoch.pt"
-    # path=""
-    t = TestPreds(checkpoint=path, is_cuda=True, ground_truth=False)
+    # path = "checkpoint/2HG_1/2021-12-08/87.554_mPCK_21epoch.pt"
+    path = ""
+
+    t = TestPreds(checkpoint=path, is_cuda=True, ground_truth=True)
     t.test(n_img=-1, show_hms=True, show_kpts=True)

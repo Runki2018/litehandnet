@@ -1,7 +1,8 @@
+from math import e
 from re import S
 import torch
 from torch import nn
-from loss.heatmapLoss import FocalLoss, RegionLoss, MaskLoss, L2Loss, JointsMSELoss
+from loss.heatmapLoss import FocalLoss, RegionLoss, MaskLoss, L2Loss, JointsMSELoss, SmoothL1Loss
 from config.config import config_dict as cfg
 
 loss_func = {
@@ -11,6 +12,7 @@ loss_func = {
     "MSE": nn.MSELoss(),
     "SmoothL1": nn.SmoothL1Loss(),
     'L2Loss': L2Loss(),
+    'SmoothL1Loss': SmoothL1Loss(),
     'JointsLoss': JointsMSELoss(),
 }
 
@@ -35,31 +37,41 @@ class HMLoss(nn.Module):
         # self.mask_loss = loss_func[cfg["mask_loss"]]
         # self.region_loss = loss_func[cfg["region_loss"]]
         self.params = cfg["param"]
-        self.n_joints = cfg['n_joints']
-        self.n_out = cfg["nstack"] + 1
+        self.n_out = len(self.params)
 
     def forward(self, hm_list, hm_gts, hm_weight=None):
-        # loss_list = []
-
-        # for i in range(self.n_out):
-        #     if self.params[i] > 0:
-        #         loss_list.append(
-        #             self.params[i] * self.kpt_loss(hm_list[i], hm_gts, hm_weight))
-
-        # # todo 到底是分开反向传播还是加起来反向传播好呢？ 可以做个实验
-        # total_loss = sum(loss_list)
-
-        # print(f"{total_loss.item()=}")
-        # assert len(loss_list) == len(self.params), f"{len(loss_list)=} != {len(self.params)}"
-        # loss_list = [l.item() for l in loss_list]
-
+        
         total_loss = 0
         for i in range(self.n_out):
-            total_loss = total_loss + \
-                  self.params[i] * self.kpt_loss(hm_list[i], hm_gts, hm_weight)
+            if self.params[i] != 0:
+                total_loss = total_loss + \
+                    self.params[i] * self.kpt_loss(hm_list[i], hm_gts, hm_weight)
 
         return total_loss
 
+class HM_Region_Loss(nn.Module):
+    """
+        heatmap + region map 的损失韩式
+        通道顺序： 0~2，region map (c, w, h)，3~23：21个关键点热图
+    """
+
+    def __init__(self):
+        super(HM_Region_Loss, self).__init__()
+        self.kpt_loss = loss_func[cfg["kpt_loss"]]
+        # self.mask_loss = loss_func[cfg["mask_loss"]]
+        self.region_loss = loss_func[cfg["region_loss"]]
+        self.params = cfg["param"]
+        self.n_joints = cfg['n_joints']
+        self.n_out = len(self.params)
+
+    def forward(self, hm_list, hm_gts, hm_weight=None):
+        total_loss = 0
+        for i in range(self.n_out):
+            if self.params[i] != 0:
+                total_loss = total_loss + \
+                        self.params[i] * self.kpt_loss(hm_list[i], hm_gts[i], hm_weight)
+
+        return total_loss
 
 if __name__ == '__main__':
     from models.RKNet import HandNetSoftmax

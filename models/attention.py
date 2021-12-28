@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 from torch.nn.modules.utils import _triple, _pair, _single
+import torch.nn.functional as F
 
 
 # import softpool_cuda
@@ -123,7 +124,7 @@ class StageChannelAttention_all(nn.Module):
     如一张图片上有两个目标，则所有通道的热图，上应该都有两个峰值点，通过LayerNorm可以标准化所有通道的值，让模型去挑选更接近均值的通道。
     """
 
-    def __init__(self, channel, reduction=4, n_block=2, min_unit=16):
+    def __init__(self, channel, reduction=4, n_block=2, min_unit=12):
         super(StageChannelAttention_all, self).__init__()
         self.n_block = n_block
         mid_channel = max(channel // reduction, min_unit)
@@ -170,6 +171,46 @@ class StageChannelAttention_all(nn.Module):
         # out = out / self.n_block
         return out
 
+
+class StageChannelAttention_fc(nn.Module):
+    """
+    https://blog.csdn.net/dedell/article/details/106768052
+    1、使用通道注意力模块，让网络自己去从多个阶段中挑选最后的输出热图
+    2、使用LayerNorm,去标准化同一图片，不同热图的全局值，好的预测热图，应该有着类似标准差和方差，
+    3、怎么使得多个通道之间有联系
+    如一张图片上有两个目标，则所有通道的热图，上应该都有两个峰值点，通过LayerNorm可以标准化所有通道的值，让模型去挑选更接近均值的通道。
+    """
+
+    def __init__(self, channel, n_block=2):
+        super(StageChannelAttention_fc, self).__init__()
+        self.n_block = n_block
+        self.global_pool = nn.AdaptiveAvgPool2d((2, 2))
+
+        self.fc = nn.Sequential(
+                nn.LayerNorm(channel * n_block),  # todo 验证自己加的 LayerNorm是否有作用
+                nn.Dropout(p=0.3),
+                nn.Linear(channel * n_block, channel * n_block),
+                # nn.ReLU(inplace=True),
+            )
+
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, x):
+        # x: [block_1, ..., block_n], block.shape=(batch, channel, h, w)
+        batch, channel, h, w = x[0].shape
+        heatmaps = torch.cat(x, dim=1)  # (batch, channel * n_block, h, w)
+        # (batch, channel* n_block, 2, 2) -> (batch, channel* n_block, 4)
+        gf1 = self.global_pool(heatmaps).view(batch, channel * self.n_block, -1)
+        gf2 = torch.matmul(gf1, gf1.transpose(1, 2))
+        gf3 = torch.sum(gf2, dim=2)
+        global_features = self.fc(gf3).view(batch, self.n_block, channel)
+        attention = self.softmax(global_features)
+
+        heatmaps = heatmaps.view(batch, self.n_block, channel, h, w)
+        attention = attention.view(batch, self.n_block, channel, 1, 1)
+        out = heatmaps * attention
+        out = torch.sum(out, dim=1)
+        return out
 
 # --------------  Spatial and Channel Attention for Region maps : -----------------
 
@@ -300,6 +341,81 @@ class SKConv(nn.Module):
         attention_vectors = attention_vectors.unsqueeze(-1).unsqueeze(-1)
         fea_v = (features * attention_vectors).sum(dim=1)
         return fea_v
+
+
+# ------------------------------------------------------------------------------------------------
+# 一种基于BN层标准化的注意力模块NAM
+# 代码： https://github.com/Christian-lyc/NAM/blob/main/MODELS/bam.py
+# 论文： https://arxiv.org/abs/2111.12419
+# ------------------------------------------------------------------------------------------------
+
+class Flatten(nn.Module):
+    def forward(self, x):
+        return x.view(x.size(0), -1)
+    
+class ChannelGate(nn.Module):
+    def __init__(self, gate_channel, reduction_ratio=16, num_layers=1):
+        super(ChannelGate, self).__init__()
+        #self.gate_activation = gate_activation
+        self.gate_c = nn.Sequential()
+        self.gate_c.add_module( 'flatten', Flatten() )
+        gate_channels = [gate_channel]
+        gate_channels += [gate_channel // reduction_ratio] * num_layers
+        gate_channels += [gate_channel]
+        for i in range( len(gate_channels) - 2 ):
+            self.gate_c.add_module( 'gate_c_fc_%d'%i, nn.Linear(gate_channels[i], gate_channels[i+1]) )
+            self.gate_c.add_module( 'gate_c_bn_%d'%(i+1), nn.BatchNorm1d(gate_channels[i+1]) )
+            self.gate_c.add_module( 'gate_c_relu_%d'%(i+1), nn.ReLU() )
+        self.gate_c.add_module( 'gate_c_fc_final', nn.Linear(gate_channels[-2], gate_channels[-1]) )
+        
+    def forward(self, in_tensor):
+        avg_pool = F.avg_pool2d( in_tensor, in_tensor.size(2), stride=in_tensor.size(2) )
+        return self.gate_c( avg_pool ).unsqueeze(2).unsqueeze(3).expand_as(in_tensor)
+
+class SpatialGate(nn.Module):
+    def __init__(self, gate_channel, reduction_ratio=16, dilation_conv_num=2, dilation_val=4):
+        super(SpatialGate, self).__init__()
+        self.gate_s = nn.Sequential()
+        self.gate_s.add_module( 'gate_s_conv_reduce0', nn.Conv2d(gate_channel, gate_channel//reduction_ratio, kernel_size=1))
+        self.gate_s.add_module( 'gate_s_bn_reduce0',	nn.BatchNorm2d(gate_channel//reduction_ratio) )
+        self.gate_s.add_module( 'gate_s_relu_reduce0',nn.ReLU() )
+        for i in range( dilation_conv_num ):
+            self.gate_s.add_module( 'gate_s_conv_di_%d'%i, nn.Conv2d(gate_channel//reduction_ratio, gate_channel//reduction_ratio, kernel_size=3, \
+						padding=dilation_val, dilation=dilation_val) )
+            self.gate_s.add_module( 'gate_s_bn_di_%d'%i, nn.BatchNorm2d(gate_channel//reduction_ratio) )
+            self.gate_s.add_module( 'gate_s_relu_di_%d'%i, nn.ReLU() )
+        self.gate_s.add_module( 'gate_s_conv_final', nn.Conv2d(gate_channel//reduction_ratio, 1, kernel_size=1) )
+        
+    def forward(self, in_tensor):
+        return self.gate_s( in_tensor ).expand_as(in_tensor)
+    
+class BAM(nn.Module):
+    def __init__(self, gate_channel):
+        super(BAM, self).__init__()
+        self.channel_att = ChannelGate(gate_channel)
+        self.spatial_att = SpatialGate(gate_channel)
+    def forward(self,in_tensor):
+        att = 1 + F.sigmoid( self.channel_att(in_tensor) * self.spatial_att(in_tensor) )
+        return att * in_tensor
+
+class NAM_Channel_Att(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.channels = channels
+        self.bn = nn.BatchNorm2d(self.channels, affine=True)  
+    
+    def forward(self, x):
+        residual = x
+
+        x = self.bn(x)
+        weight_bn = self.bn.weight.data.abs() / torch.sum(self.bn.weight.data.abs())
+        x = x.permute(0, 2, 3, 1).contiguous()
+        x = torch.mul(weight_bn, x)
+        x = x.permute(0, 3, 1, 2).contiguous()
+        
+        x = torch.sigmoid(x) * residual
+        
+        return x
 
 
 if __name__ == '__main__':

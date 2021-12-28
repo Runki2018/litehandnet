@@ -1,9 +1,10 @@
 # from config.handNet6_cfg import current_config as config_dict
 # from config.handNet_cfg import current_config as config_dict
-from config.RKNet_mpii_cfg import current_config as config_dict
-# from config.handNet4_cfg import current_config as config_dict
+# from config.RKNet_mpii_cfg import current_config as config_dict
+# from config.RKNet_mpii_SA_cfg import current_config as config_dict
+# from config.freihand_cfg.pose_estimation.srhandnet_cfg import srhandnet_cfg as config_dict
+from config.RKNet_handset_cfg import HG_cfg as config_dict
 
-# from config.backbone_cfg import current_config as config_dict
 
 mpii = {
     "name": "mpii",
@@ -28,34 +29,34 @@ zhhand = {
 
 freihand = {
     "name": "freihand",
-    "root": "/home/data3/freiHAND/",
-    "test_file": "/home/data3/freiHAND/annotations/freihand_test.json",
-    "train_file": "/home/data3/freiHAND/annotations/freihand_train.json",
+    "root": r"/home/user/PycharmProjects/Dataset/freiHand/",
+    "test_file": r"/home/user/PycharmProjects/Dataset/freiHand/annotations/freihand_test.json",
+    "train_file": r"/home/user/PycharmProjects/Dataset/freiHand/annotations/freihand_train.json",
     "thr_list": [0.12740034726360222, 0.17060353893099983, 0.21433420109795465],
     "n_bbox": [19364, 34144, 35592, 15092],
 }
 freihand100 = {
     "name": "freihand100",
-    "root": "/home/data3/freiHAND/",
-    "test_file": "../data/handset/freihand100.json",
-    "train_file": "../data/handset/freihand100.json",
+    "root": r"/home/user/PycharmProjects/Dataset/freiHand/",
+    "test_file": "./data/handset/freihand100.json",
+    "train_file": "./data/handset/freihand100.json",
     "thr_list": [0.12740034726360222, 0.17060353893099983, 0.21433420109795465],
     "n_bbox": [19364, 34144, 35592, 15092],
 }
 
 zhhand20 = {
     "name": "zhhand20",
-    "root": "D:/python/project/LabelKPs/sample/",
-    "train_file": "../data/handset/zhhand20.json",
-    "test_file": "../data/handset/zhhand20.json",
+    "root": "/home/data2/ZHhands/allocate_dataset/",
+    "train_file": "./data/handset/zhhand20.json",
+    "test_file": "./data/handset/zhhand20.json",
     "thr_list": [0.20962208537055094, 0.4084713988053167, 0.6853853875598244],
 }
 
 zhhand100 = {
     "name": "zhhand100",
     "root": "/home/data2/ZHhands/allocate_dataset/",
-    "train_file": "../data/zhhand100.json",
-    "test_file": "../data/zhhand100.json",
+    "train_file": "./data/handset/zhhand20.json",
+    "test_file": "./data/handset/zhhand20.json",
     "thr_list": [0.20962208537055094, 0.4084713988053167, 0.6853853875598244],
     "n_bbox": [371, 301, 154, 51]
 }

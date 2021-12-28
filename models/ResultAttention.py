@@ -3,7 +3,7 @@ import time
 from torch import nn
 from models.layers import Conv, Residual, Hourglass, BasicBlock, ConvBnReLu, SPP_layer
 from models.hourglass import HourglassNet, Residual, Residual_SA
-from models.attention import StageChannelAttention, StageChannelAttention_all
+from models.attention import StageChannelAttention_fc, StageChannelAttention_all
 from models.region_layer import SizeBlock, RegionBlock
 from config.config import config_dict as cfg
 
@@ -23,13 +23,16 @@ class RANet(nn.Module):
         self.stage_network = HourglassNet(nstack=num_hourglass,
                                           inp_dim=main_channels,
                                           oup_dim=n_points,
-                                          increase=0)
-                                        #   basic_block=Residual)
+                                          increase=0,
+                                          basic_block=Residual)
 
         self.attention = StageChannelAttention_all(channel=n_points,
                                                    reduction=4,
                                                    n_block=num_hourglass,
-                                                   min_unit=16)
+                                                   min_unit=12)
+        
+        # self.attention = StageChannelAttention_fc(channel=n_points,
+        #                                            n_block=num_hourglass)
         # self.init_weight()
 
     def forward(self, x):

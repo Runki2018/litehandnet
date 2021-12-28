@@ -1,13 +1,17 @@
 import torch
 import cv2
 
-from utils.evaluation import evaluate_pck, evaluate_ap, get_coordinates_from_heatmap
+
 # os.environ['CUDA_VISIBLE_DEVICES'] = '2,3'
-# sys.path.insert(0, os.path.abspath('..' + '/'))
-# print(sys.path)
-# from models.handNet2 import HandNetSigmoid as network
-# from models.handNet3 import HandNet3 as Network
-from models.RKNet_SPP import RegionKeypointNetwork_SPP as Network
+import os
+import sys
+sys.path.insert(0, os.path.abspath('.'))
+print(sys.path)
+
+from utils.evaluation import evaluate_pck, evaluate_ap, get_coordinates_from_heatmap
+from utils.training_kits import stdout_to_tqdm, load_pretrained_state
+
+from models.hourglass_SA import HourglassNet_SA as Network
 from data import get_dataset
 from config.config import DATASET, config_dict
 from utils.visualization_tools import draw_heatmaps, draw_region_maps, draw_point, draw_bbox, draw_text
@@ -17,7 +21,7 @@ class TestPreds:
     def __init__(self, checkpoint="", is_cuda=True, ground_truth=False):
 
         print("preparing data...")
-        self.dataset, self.test_loader = get_dataset(set_type='train')
+        self.dataset, self.test_loader = get_dataset(set_type='test')
         print("done!")
 
         if is_cuda:
@@ -30,8 +34,13 @@ class TestPreds:
         if checkpoint != "":
             print("loading state dict...")
             save_dict = torch.load(checkpoint, map_location=self.device)
-            self.model.load_state_dict(save_dict["model_state"])
-            print("done!")
+            print(f"{save_dict.keys()=}")
+            
+            state, is_match = load_pretrained_state(self.model.state_dict(),
+                                                    save_dict['state_dict'])
+            # self.model.load_state_dict(save_dict["state_dict"])
+            self.model.load_state_dict(state)
+            print(f"done! {is_match=}")
 
     def test(self, n_img=10, show_hms=True, show_kpts=True):
         self.model.eval()
@@ -139,11 +148,11 @@ class TestPreds:
 
 
 if __name__ == '__main__':
-    new_size = config_dict["new_size"][0]
+    new_size = config_dict["image_size"][0]
     # path = "../record/handnet3_2/2021-09-13/0.716_mPCK_647epoch.pt"
     # path = "../record/handnet3_3/2021-09-13/0.669_mPCK_173epoch.pt"
     # path = "../record/handnet3_1/2021-09-20/0.8_mPCK_86epoch.pt"
-    path = "../weight/0.925_mPCK_handnet3_ms_512_zhhand.pt"
+    path = "./checkpoint/MSRB-D-DW-PELEE/1HG-ME-att-c256/2021-12-27/0.981_PCK_47epoch.pt"
     # path=""
     t = TestPreds(checkpoint=path, is_cuda=True, ground_truth=False)
     t.test(n_img=-1, show_hms=False, show_kpts=True)

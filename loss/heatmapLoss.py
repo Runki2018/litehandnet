@@ -2,6 +2,39 @@ import torch
 from torch import nn
 
 
+class SmoothL1Loss(nn.Module):
+    """
+        参考cornerNet损失函数进行了修改
+        https://github.com/feifeiwei/Pytorch-CornerNet/blob/master/module/loss_module.py
+    """
+
+    def __init__(self):
+        super(SmoothL1Loss, self).__init__()
+        self.criterion = nn.SmoothL1Loss()
+
+    def forward(self, hm_preds, hm_gts, hm_weight=None):
+        """
+
+        :param hm_preds: (batch, n_joints or 1+n_joints, hm_height, hm_width)
+        :param hm_gts: (batch, n_joints or 1+n_joints, hm_height, hm_width)
+        :param hm_weight: (batch, n_joints or 1+n_joints, 1)
+        :return:
+        """
+
+        loss = 0
+        for batch_idx, (pred, gt) in enumerate(zip(hm_preds, hm_gts)):
+            for joint_idx, (pred_, gt_) in enumerate(zip(pred, gt)):
+                if hm_weight is not None and hm_weight[batch_idx, joint_idx] == 0:
+                    continue
+                loss +=  self.criterion(pred_, gt_)
+
+        loss /= hm_gts.shape[0]
+        if torch.isnan(loss):
+            import pdb
+            pdb.set_trace()
+
+        return loss
+
 class L2Loss(nn.Module):
     """
         参考cornerNet损失函数进行了修改
@@ -25,11 +58,8 @@ class L2Loss(nn.Module):
         for batch_idx, (pred, gt) in enumerate(zip(hm_preds, hm_gts)):
             for joint_idx, (pred_, gt_) in enumerate(zip(pred, gt)):
                 if hm_weight is not None and hm_weight[batch_idx, joint_idx] == 0:
-                    weight = 0
-                else:
-                    weight = 1
-
-                loss +=  weight * self.criterion(pred_, gt_)
+                    continue
+                loss += self.criterion(pred_, gt_)
 
         loss /= hm_gts.shape[0]
         if torch.isnan(loss):
@@ -67,9 +97,7 @@ class FocalLoss(nn.Module):
         for batch_idx, (pred, gt) in enumerate(zip(hm_preds, hm_gts)):
             for joint_idx, (pred_, gt_) in enumerate(zip(pred, gt)):
                 if hm_weight is not None and hm_weight[batch_idx, joint_idx] == 0:
-                    weight = 0
-                else:
-                    weight = 1
+                    continue
 
                 pos_pred = pred_[pos_mask[batch_idx, joint_idx]]  # 正样本预测为真的概率，越高越好
                 neg_pred = 1 - pred_[neg_mask[batch_idx, joint_idx]]  # 负样本预测预测为假概率，越高越好
@@ -93,9 +121,9 @@ class FocalLoss(nn.Module):
                 neg_loss = neg_loss.sum()
 
                 if pos_pred.nelement() == 0:  # no element
-                    loss = loss - neg_loss * weight
+                    loss = loss - neg_loss 
                 else:
-                    loss = loss - (pos_loss + neg_loss) / num_pos * weight
+                    loss = loss - (pos_loss + neg_loss) / num_pos
 
                 # if torch.isnan(loss):
                 #     import pdb

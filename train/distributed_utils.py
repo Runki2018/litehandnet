@@ -2,6 +2,7 @@ import os
 
 import torch
 import torch.distributed as dist
+from utils.training_kits import set_seeds
 
 
 def init_distributed_mode(args):
@@ -18,6 +19,9 @@ def init_distributed_mode(args):
         return
 
     args.distributed = True
+    
+    # 设置不同的随机数种子，防止多卡数据增广的同态性，从而间隙性能
+    set_seeds(seed=1+args.rank, cuda_deterministic=False)
 
     torch.cuda.set_device(args.gpu)
     args.dist_backend = 'nccl'  # 通信后端，nvidia GPU推荐使用NCCL

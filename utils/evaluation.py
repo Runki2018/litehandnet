@@ -128,8 +128,7 @@ def cs_from_region_map(batch_region_maps, k=2000, thr=0.8):
             if flag:
                 # todo 这里用 a // b会有警告，建议替换为torch.div(a, b, rounding_mode='trunc')
                 center = top_idx[bi][ki] % heatmap_size, \
-                         top_idx[bi][ki] // heatmap_size
-                         # torch.div(top_idx[bi][ki], heatmap_size, rounding_mode='trunc')
+                         torch.div(top_idx[bi][ki], heatmap_size, rounding_mode='trunc') # top_idx[bi][ki] // heatmap_size
                 # print(f"{center=}")
                 candidates[bi, ki, 0] = center[0]  # column, x in heatmap
                 candidates[bi, ki, 1] = center[1]  # row, y in heatmap
@@ -235,13 +234,13 @@ def evaluate_ap(batch_region_maps, gt_boxes, k=200, conf_thr=0.3,
     """
 
     candidates = cs_from_region_map(batch_region_maps, k, parser_cfg['detection_threshold'])
-    print(f"{candidates[:20]=}")
+    # print(f"{candidates[:20]=}")
     pred_bboxes = non_max_suppression(candidates, parser_cfg["iou_threshold"],
                                       parser_cfg['detection_threshold'], parser_cfg["max_num_bbox"])
-    print(f"{pred_bboxes[0]=}")
+    # print(f"{pred_bboxes[0]=}")
 
     gt_boxes = gt_boxes.tolist() if isinstance(gt_boxes, torch.Tensor) else gt_boxes
-    print(f"{gt_boxes[0]=}")
+    # print(f"{gt_boxes[0]=}")
     ap50, ap = count_ap(pred_boxes=pred_bboxes, gt_boxes=gt_boxes, iou_threshold=iou_thr)
     # print(f"{ap=}")
 

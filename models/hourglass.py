@@ -1,8 +1,7 @@
 import torch
 from torch import nn
-import time
-
-from torch.nn.modules.activation import ELU
+from utils.training_kits import load_pretrained_state
+from config.config import config_dict as cfg
 
 
 class Merge(nn.Module):
@@ -70,8 +69,26 @@ class Residual(nn.Module):
         out += residual
         return out
 
+class BRC(nn.Module):
+    """  BN + Relu + Conv2d """    
+    def __init__(self, inp_dim, out_dim, kernel_size=3, stride=1, padding=1, bias=False, dilation=1):
+        super(BRC, self).__init__()
+        self.inp_dim = inp_dim
+        self.conv = nn.Conv2d(inp_dim, out_dim, kernel_size, stride,
+                            padding=padding, bias=bias, dilation=dilation)
+        self.relu = nn.ReLU(inplace=True)
+        self.bn = nn.BatchNorm2d(inp_dim)
+
+    def forward(self, x):
+        x = self.bn(x)
+        x = self.relu(x)
+        x = self.conv(x)
+        return x
 
 class Residual_SA(nn.Module):
+    """
+    https://blog.csdn.net/KevinZ5111/article/details/104730835?utm_medium=distribute.pc_aggpage_search_result.none-task-blog-2~aggregatepage~first_rank_ecpm_v1~rank_v31_ecpm-4-104730835.pc_agg_new_rank&utm_term=block%E6%94%B9%E8%BF%9B+residual&spm=1000.2123.3001.4430
+    """
     def __init__(self, in_c, out_c):
         super(Residual_SA, self).__init__()
         self.global_pool = nn.Sequential(  # 这里看后面能不能改成全局 SoftPool
@@ -80,36 +97,23 @@ class Residual_SA(nn.Module):
 
         self.fc = nn.Sequential(
             nn.LayerNorm(in_c),
+            nn.ELU(inplace=True),
             nn.Linear(in_c, in_c // 2),
             nn.BatchNorm1d(in_c // 2),
-            nn.ELU(inplace=True),
-            nn.Linear(in_c // 2, out_c),
-            nn.BatchNorm1d(out_c),
+            nn.Linear(in_c // 2, in_c),   
             nn.Sigmoid())
 
         mid_c = in_c // 2
-        self.conv_block = nn.Sequential(
-            nn.BatchNorm2d(in_c),
-            nn.ELU(inplace=True),
-            nn.Conv2d(in_c, mid_c, 1, 1, 0, bias=False),
+        self.conv1 = BRC(in_c, mid_c, 1, 1, 0)
 
-            nn.BatchNorm2d(mid_c),
-            nn.ELU(inplace=True),
-            nn.Conv2d(mid_c, mid_c // 2, 3, 1, 1, bias=False),
-
-            nn.BatchNorm2d(mid_c // 2),
-            nn.ELU(inplace=True),
-            nn.Conv2d(mid_c // 2, mid_c, 3, 1, 1, bias=False),
-
-            nn.BatchNorm2d(mid_c),
-            nn.ELU(inplace=True),
-            nn.Conv2d(mid_c, out_c, 1, 1, 0, bias=False)
-            )
-
-        if in_c == out_c:
-            self.skip_conv = nn.Identity()
-        else:
-            self.skip_conv = nn.Conv2d(in_c, out_c, 1, 1, 0)
+        self.mid1_conv = nn.ModuleList([
+            BRC(mid_c, mid_c // 2, 3, 1, 1)  for _ in range(2) ])
+        
+        self.mid2_conv = nn.ModuleList([  # MSRB中是5x5，这里用空洞卷积来扩大感受野，可减少参数量
+            BRC(mid_c, mid_c // 2, 3, 1, 2, dilation=2)  for _ in range(2) for _ in range(2)  ])
+        
+        self.conv2 = BRC(mid_c, in_c, 1, 1, 0, bias=False)
+        self.conv3 = BRC(in_c, out_c, 1, 1, 0, bias=False)
 
     def forward(self, x):
         # (batch, channel, 1, 1) -> (batch, channel)
@@ -117,27 +121,29 @@ class Residual_SA(nn.Module):
         factors = self.global_pool(x).view(b, c)
         factors = self.fc(factors).view(b, c, 1, 1)
 
-        features = self.conv_block(x)
-        features = features* factors
-        out = features + self.skip_conv(x)
+        m = self.conv1(x)
+        for i in range(2):
+            m1 = self.mid1_conv[i](m)
+            m2 = self.mid2_conv[i](m)
+            m = torch.cat([m1, m2], dim=1)
+        features = self.conv2(m) * factors
+        out = self.conv3(features)
         return out
 
-
 class Hourglass(nn.Module):
-    def __init__(self, n, f, bn=None, increase=0):
+    def __init__(self, n, f, increase=0, basic_block=Residual):
         super(Hourglass, self).__init__()
         nf = f + increase
-        self.up1 = Residual(f, f)
+        self.up1 = basic_block(f, f)
         # Lower branch
         self.pool1 = nn.MaxPool2d(2, 2)
-        self.low1 = Residual(f, nf)
-        self.n = n
+        self.low1 = basic_block(f, nf)
         # Recursive hourglass
-        if self.n > 1:
-            self.low2 = Hourglass(n - 1, nf, bn=bn)
+        if n > 1:
+            self.low2 = Hourglass(n - 1, nf)
         else:
-            self.low2 = Residual(nf, nf)
-        self.low3 = Residual(nf, f)
+            self.low2 = basic_block(nf, nf)
+        self.low3 = basic_block(nf, f)
         self.up2 = nn.Upsample(scale_factor=2, mode='nearest')
 
     def forward(self, x):
@@ -151,38 +157,10 @@ class Hourglass(nn.Module):
         up2 = self.up2(low3)
         return up1 + up2
 
-# class Hourglass(nn.Module):
-#     def __init__(self, n, f, bn=None, increase=0, basic_block=Residual):
-#         super(Hourglass, self).__init__()
-#         nf = f + increase
-#         self.up1 = basic_block(f, f)
-#         # Lower branch
-#         self.pool1 = nn.MaxPool2d(2, 2)
-#         self.low1 = basic_block(f, nf)
-#         self.n = n
-#         # Recursive hourglass
-#         if self.n > 1:
-#             self.low2 = Hourglass(n - 1, nf, bn=bn)
-#         else:
-#             self.low2 = basic_block(nf, nf)
-#         self.low3 = basic_block(nf, f)
-#         self.up2 = nn.Upsample(scale_factor=2, mode='nearest')
-
-#     def forward(self, x):
-#         up1 = self.up1(x)
-#         pool1 = self.pool1(x)
-#         low1 = self.low1(pool1)
-
-#         low2 = self.low2(low1)
-
-#         low3 = self.low3(low2)
-#         up2 = self.up2(low3)
-#         return up1 + up2
-
 
 class HourglassNet(nn.Module):
-    def __init__(self, nstack=2, inp_dim=256, oup_dim=16, bn=False, increase=0): 
-        # basic_block=Residual):
+    def __init__(self, nstack=cfg['nstack'], inp_dim=256, oup_dim=16,  increase=0,
+        basic_block=Residual):
         super(HourglassNet, self).__init__()
 
         self.pre = nn.Sequential(
@@ -198,8 +176,7 @@ class HourglassNet(nn.Module):
 
         self.hgs = nn.ModuleList([
             nn.Sequential(
-                # Hourglass(4, inp_dim, bn, increase, basic_block=basic_block),
-                Hourglass(4, inp_dim, bn, increase),
+                Hourglass(4, inp_dim, increase, basic_block=basic_block),
             ) for _ in range(nstack)])
 
         self.features = nn.ModuleList([
@@ -235,12 +212,20 @@ class HourglassNet(nn.Module):
     
     def load_weights(self):
         if self.nstack == 2:
-            pre_trained = './weight/2HG_checkpoint.pt'
+            # pre_trained = './weight/2HG_checkpoint.pt'
+            pre_trained = './weight/2HG_86.724PCK_76epoch.pt'
         elif self.nstack == 8:
-            pre_trained = './weight/8HG_checkpoint.pt'
+            # pre_trained = './weight/8HG_checkpoint.pt'
+            pre_trained = './weight/8HG_89.355PCK_90epoch.pt'
         else:
             return
-        self.load_state_dict(torch.load(pre_trained)['state_dict'], strict=False)
+        # pretrained_state = torch.load(pre_trained)['state_dict']
+        pretrained_state = torch.load(pre_trained, map_location=torch.device('cpu'))['model_state']
+        
+        state, _ = load_pretrained_state(self.state_dict(),
+                                                pretrained_state)
+
+        self.load_state_dict(state, strict=False)
         # for p in self.parameters():
         #     p.requires_grad = False
 

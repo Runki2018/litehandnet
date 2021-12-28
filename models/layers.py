@@ -366,4 +366,69 @@ class Hourglass_Bulat(nn.Module):
         # print(f"{up1.shape=}"), print(f"{up2.shape=}")
         return up1 + up2
 
+# lite hrnet -------------------------------------------
 
+class DWConv(nn.Module):
+    """DepthwiseSeparableConvModul 深度可分离卷积"""
+    def __init__(self, in_channel, out_channel, stride=1, mid_relu=True, last_relu=True, bias=False, dilation=1, padding=1):
+        super().__init__()
+        self.depthwise_conv = nn.Sequential(
+            nn.Conv2d(in_channel, in_channel, 3, stride, padding, groups=in_channel, bias=bias, dilation=dilation),
+            nn.BatchNorm2d(in_channel))      
+        self.mid_relu = nn.ReLU() if mid_relu else nn.Identity()  # 正常的DWConv直接有ReLU
+        self.pointwise_conv = nn.Sequential(
+            nn.Conv2d(in_channel, out_channel, 1, 1, 0, bias=bias),
+            nn.BatchNorm2d(out_channel))
+        self.last_relu = nn.ReLU() if last_relu else nn.Identity()  # 正常的DWConv直接有ReLU
+        
+    def forward(self, x):
+        out = self.mid_relu(self.depthwise_conv(x)) 
+        out = self.last_relu(self.pointwise_conv(out)) 
+        return out
+
+
+def channel_shuffle(x, groups):
+    """Channel Shuffle operation.
+
+    This function enables cross-group information flow for multiple groups
+    convolution layers.
+
+    Args:
+        x (Tensor): The input tensor.
+        groups (int): The number of groups to divide the input tensor
+            in the channel dimension.
+
+    Returns:
+        Tensor: The output tensor after channel shuffle operation.
+    """
+
+    batch_size, num_channels, height, width = x.size()
+    assert (num_channels % groups == 0), ('num_channels should be '
+                                          'divisible by groups')
+    channels_per_group = num_channels // groups
+
+    x = x.view(batch_size, groups, channels_per_group, height, width)
+    x = torch.transpose(x, 1, 2).contiguous()
+    x = x.view(batch_size, -1, height, width)
+
+    return x
+
+class DWConvBlock(nn.Module):
+    """这个是LiteHrnet中基础模块的简化版"""
+    def __init__(self, in_c, out_c, stride=1, mid_relu=True, last_relu=True, bias=False):
+        super().__init__()
+        self.conv1x1 = ConvBnReLu(in_c, out_c, 1, 1, 0)
+        self.depth_separate_conv = DWConv(out_c // 2, out_c //2, stride, mid_relu, last_relu, bias)
+    
+    def forward(self, x):
+        x = self.conv1x1(x)
+        x1, x2 = x.chunk(2, dim=1) 
+        x2 = self.depth_separate_conv(x2)
+        x = torch.cat([x1, x2], dim=1)
+        out = channel_shuffle(x, 2)
+        return out
+    
+    
+    
+    
+    
