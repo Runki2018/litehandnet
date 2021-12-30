@@ -66,6 +66,9 @@ class HM_Region_Loss(nn.Module):
 
     def forward(self, hm_list, hm_gts, hm_weight=None):
         total_loss = 0
+        # print(f"{len(self.params)=}")
+        # print(f"{len(hm_list)=}")
+        # print(f"{len(hm_gts)=}")
         for i in range(self.n_out):
             if self.params[i] != 0:
                 total_loss = total_loss + \

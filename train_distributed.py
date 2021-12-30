@@ -1,13 +1,18 @@
 from re import S
 import torch
 import argparse
+from torch.nn import modules
 import torch.optim as optim
 import torch.nn as nn
 import numpy as np
+from torch.serialization import load
 from tqdm import tqdm
 from datetime import datetime
 from utils.transforms import get_final_preds
-from models.ResultAttention import RANet as Network
+# from models.ResultAttention import RANet as Network
+# from models.hourglass import HourglassNet as Network
+from models.hourglass_SA import HourglassNet_SA as Network
+# from models.lite_hrnet import LiteHRNet as Network
 from loss.loss import HMLoss as Loss
 from train.distributed_utils import init_distributed_mode, dist, cleanup, reduce_value, reduce_value
 from utils.training_kits import stdout_to_tqdm, load_pretrained_state
@@ -21,7 +26,6 @@ exp_id = cfg["experiment_id"]
 
 torch.backends.cudnn.enabled = True
 torch.backends.cudnn.benchmark = True
-
 
 
 def get_argment():
@@ -62,7 +66,7 @@ class Main:
         init_distributed_mode(args=args)
 
         self.rank = args.rank
-        self.device = torch.device(args.device)
+        self.device = torch.device(args.gpu)
         self.batch_size = args.batch_size
         self.weights_path = args.weights
         args.lr *= args.world_size  # 学习率要根据并行GPU的数量进行倍增
@@ -89,34 +93,47 @@ class Main:
                                                 num_workers=num_wokers)
 
         # 多GPU训练
-        self.model = Network().to(self.device)
+        self.model = Network()
         
-        self.optimizer = optim.SGD(self.model.parameters(), lr=args.lr, momentum=0.9)
-        # self.optimizer = optim.AdamW(self.model.parameters(), lr=args.lr)
-        # self.optimizer = optim.RMSprop(self.model.parameters(), lr=args.lr)
+        pl = [p for p in self.model.parameters() if p.requires_grad]
+        if cfg['optim'] == 'SGD':
+            self.optimizer = optim.SGD(pl, lr=args.lr, momentum=0.9)
+        elif cfg['optim'] == 'RMSprop':
+            self.optimizer = optim.RMSprop(pl, lr=args.lr)
+        else:
+            self.optimizer = optim.AdamW(pl, lr=args.lr)
+            # self.optimizer = optim.NAdam(pl, lr=args.lr)
 
-        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode="min", patience=20,
-                                                              min_lr=cfg["lr"] * 0.001, cooldown=10)
+        # self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode="min",   patience=20,
+        #                                                       min_lr=cfg["lr"] * 0.001, cooldown=10)
+
+        # 自定义的逐周期递减正弦学习率曲线
+        T, lr_gamma, min_lr = cfg['T'], cfg['lr_gamma'], cfg['min_lr'] / args.lr
+        lambda1 = lambda epoch: np.cos((epoch % (T + (epoch / T)) / (T + (epoch / T))) * np.pi / 2) * (lr_gamma ** (epoch / T)) + min_lr
+        self.scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lambda1)
 
         self.criterion = Loss()
-        for state in self.optimizer.state.values():
-            for k, v in state.items():  # optimizer加载参数时,tensor默认在CPU上
-                if torch.is_tensor(v):
-                    state[k] = v.to(self.device)
+        # for state in self.optimizer.state.values():
+        #     for k, v in state.items():  # optimizer加载参数时,tensor默认在CPU上
+        #         if torch.is_tensor(v):
+        #             state[k] = v.to(self.device)
 
         # load checkpoint
         if cfg["reload"]:
-            self.save_dict = torch.load(cfg["checkpoint"])
-            if 'model_state' in self.save_dict:
-                state, is_match = load_pretrained_state(self.model.state_dict(),
-                                                        self.save_dict['model_state'])
-            elif 'state_dict' in self.save_dict:
+            self.save_dict = torch.load(cfg["checkpoint"], map_location=torch.device('cpu'))
+            if 'state_dict' in self.save_dict:
                 state, is_match = load_pretrained_state(self.model.state_dict(),
                                                         self.save_dict['state_dict'])
+            elif 'model_state' in self.save_dict:
+                state, is_match = load_pretrained_state(self.model.state_dict(),
+                                                        self.save_dict['model_state'])
             else:
                 state, is_match = load_pretrained_state(self.model.state_dict(),
                                                         self.save_dict)
+
+            print(f"reload checkpoint and is_match: {is_match}")
             self.model.load_state_dict(state)
+
             if not cfg["just_model"] and is_match:
                 self.optimizer.load_state_dict(self.save_dict["optimizer"])
                 self.start_epoch = self.save_dict["epoch"]
@@ -126,18 +143,21 @@ class Main:
             checkpoint_path = self.save_root + "initial_weights.pt"
             # 如果不存在预训练权重，需要将第一个进程中的权重保存，然后其他进程载入，保持初始化权重一致
             if self.rank == 0 and not os.path.exists(checkpoint_path):
+                os.makedirs(self.save_root, exist_ok=True)
                 torch.save(self.model.state_dict(), checkpoint_path)
 
             dist.barrier()
             # 这里注意，一定要指定map_location参数，否则会导致第一块GPU占用更多资源
-            self.model.load_state_dict(torch.load(checkpoint_path, map_location=self.device))
+            self.model.load_state_dict(torch.load(checkpoint_path, map_location=torch.device('cpu')))
+            self.model = self.model.to(self.device)
+            # self.model.load_state_dict(torch.load(checkpoint_path, map_location='cpu'))
 
         # 存储参数的字典
         self.best_loss = 0
         self.best_mPCK = 0
         self.best_ap = 0
         self.save_dict = {"epoch": 0, "lr": [], "loss": [], "mPCK": [], "ap": [],
-                          "model_state": {}, "optimizer": {}, "config": cfg}
+                          "state_dict": {}, "optimizer": {}, "config": cfg}
 
         if args.syncBN:
             # 使用SyncBatchNorm后训练会更耗时
@@ -148,6 +168,8 @@ class Main:
             print(args)
             from tensorboardX import SummaryWriter
             self.writer = SummaryWriter(logdir=self.save_root + 'log')  # 记录训练参数日志
+            self.n_out = len(cfg['param'])
+            print(f"{self.n_out=}")
         
         # 转为DDP模型, 这步放在最后
         self.model = torch.nn.parallel.DistributedDataParallel(self.model,
@@ -155,34 +177,30 @@ class Main:
                                                          find_unused_parameters=True)
         print("Model is ready!")
 
+
     def train(self):
         self.model.train()
-        with stdout_to_tqdm() as save_stdout:
-            if self.rank == 0:
-                self.train_loader = tqdm(self.train_loader, desc="training ") 
+        # with stdout_to_tqdm() as save_stdout:
+        if self.rank == 0:
+            self.train_loader = tqdm(self.train_loader, desc="training ") 
 
-            for img, target, target_weight, _ in self.train_loader:
-                
-                # torch.cuda.synchronize()
-                # s = time.time()
-                output = self.model(img.to(self.device))
-                # torch.cuda.synchronize()
-                # e = time.time()
-                # print(f'time = {e-s}')
+        for img, target, target_weight, _ in self.train_loader:     
+            output = self.model(img.to(self.device))
 
-                target = target.to(self.device)
-                target_weight = target_weight.to(self.device)
-                loss = self.criterion(output, target, target_weight)
+            target = target.to(self.device)
+            target_weight = target_weight.to(self.device)
+            loss = self.criterion(output, target, target_weight)
 
-                loss.backward()
-                # loss = reduce_value(loss, average=True)
-                self.optimizer.step()
-                self.optimizer.zero_grad()
+            loss.backward()
+            # loss = reduce_value(loss, average=True)
+            self.optimizer.step()
+            self.optimizer.zero_grad()
 
         with torch.no_grad():
             lr = self.optimizer.param_groups[0]['lr']
             if lr > 5e-7:
-                    self.scheduler.step(metrics=loss)
+                    # self.scheduler.step(metrics=100 - self.best_mPCK)
+                    self.scheduler.step()
 
             if self.rank == 0:
                 loss = loss.item()
@@ -196,7 +214,7 @@ class Main:
                 best_loss = min(self.save_dict["loss"])
                 if loss <= best_loss:
                     self.best_loss = loss
-                    self.save_model(best_loss=True)
+                    # self.save_model(best_loss=True)
 
                 self.writer.add_scalar("loss", loss, self.epoch)
                 self.writer.add_scalar("lr", lr, self.epoch)
@@ -209,25 +227,28 @@ class Main:
         self.model.eval()
         if self.rank == 0:
             with torch.no_grad():
-                n_out = cfg['nstack'] + 1
-                pck = [0] * n_out
+                pck = [0] * self.n_out
                 pred_kpts = []
                 for img, target, _, meta in tqdm(self.test_loader, desc="testing "):
                     hm_list = self.model(img.cuda())
                     c = meta['center'].numpy()
                     s = meta['scale'].numpy()
-                    for i in range(n_out):
+                    for i in range(self.n_out):
                         if len(pred_kpts) == i:
                             pred_kpts.append([])
                         kpt = get_final_preds(hm_list[i], c, s)
-                        # kpt = get_final_preds(target, c, s)
                         pred_kpts[i].append(kpt)
 
-                for i in range(n_out):
+                print('index\tHead\tShoulder\tElbow\tWrist\tHip\tKnee\tAnkle\tMean\tMean@0.1')
+                for i in range(self.n_out):
                     preds = np.concatenate(pred_kpts[i])  # [n_images, n_joints, 3]
-                    print(f'{preds.shape=}')
-                    name_value, PCKh = self.test_set.evaluate(preds, cfg['out_dir'])
-                    print(f"PCKh_{i}\n {name_value}")
+                    results, PCKh = self.test_set.evaluate(preds, cfg['out_dir'])
+                    # print(f"PCKh_{i}\n {name_value}")  
+                    print(f"{i}\t{results['Head']:.5}\t{results['Shoulder']:.5}\t\t", end='')
+                    print(f"{results['Elbow']:.5}\t{results['Wrist']:.5}\t", end='')
+                    print(f"{results['Hip']:.5}\t{results['Knee']:.5}\t", end='')
+                    print(f"{results['Ankle']:.5}\t{results['Mean']:.5}\t", end='')
+                    print(f"{results['Mean@0.1']:.5}")
                     pck[i] = PCKh
 
                 # 记录训练数据
@@ -264,7 +285,7 @@ class Main:
         print(f"{save_file=}")
 
         self.save_dict["epoch"] = self.epoch
-        self.save_dict["model_state"] = self.model.state_dict()
+        self.save_dict["state_dict"] = self.model.state_dict()
         self.save_dict["optimizer"] = self.optimizer.state_dict()
         torch.save(self.save_dict, save_file)
 
@@ -292,3 +313,6 @@ if __name__ == '__main__':
     opt = get_argment()
     Main(opt).run()
     # python -m torch.distributed.launch --nproc_per_node=4 --use_env train_distributed.py
+    # CUDA_VISIBLE_DEVICES=2,3 python -m torch.distributed.launch --nproc_per_node=2 --use_env --master_port 29501 train_distributed.py
+
+    # CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 train_distributed.py

@@ -1,20 +1,20 @@
 HG_cfg = {
-    "experiment_id": "litehrnet-region",
+    "experiment_id": "3HG-ME-att-c64",
     'dataset': 'freihand',
     # model structure:
     'n_joints': 21,  # keypoints + region map
     'bn_momentum': 0.1,
     'need_region_map': True,  # 预测 region map
     'image_size': (256, 256), # (352, 352), 
-    "hm_size": (64,),  # (16, 16, 32, 64), (22, 22, 44, 88),
-    "hm_sigma": (2,), # (2, 2), 
+    "hm_size": (64, 64, 64),  # (16, 16, 32, 64), (22, 22, 44, 88),
+    "hm_sigma": (2, 2, 2), # (2, 2), 
     'mask_type': 3,
-    "main_channels": 256,
+    "main_channels": 64,
     'increase': 0,
     'hg_depth': 4, 
-    "nstack": 1,
+    "nstack": 3,
     'higher_output': False,
-    "param": (1, ),   # assert len(param) == nstack + higher_output
+    "param": (1, 1, 1),   # assert len(param) == nstack + higher_output
     
 
     # data augmentation
@@ -32,12 +32,12 @@ HG_cfg = {
     "mask_loss": "L2Loss",
     "region_loss": "L2Loss",
     
-    'batch_size': 32,
+    'batch_size': 64,
     "syncBN": True,         # 这个很关键,对最终性能有略微提升的效果
     'workers': 8,
 
     "CUDA_VISIBLE_DEVICES": "0, 1, 2, 3",
-    'n_epochs': 60000,
+    'n_epochs': 210,
     'eval_interval': 1,
     'pck_thr': 0.2, 
     'lr': 1e-3,
@@ -48,7 +48,7 @@ HG_cfg = {
     'lr_gamma': 0.8,  # 每周期学习率递减因子
     "n_epochs": 500,
     "reload": True,
-    "just_model": True,
-    "checkpoint": "checkpoint/liteHRNet/lite-hrnet1/2021-12-12/81.598_mPCK_41epoch.pt",
-    "save_root": "./checkpoint/liteHRNet/"
+    "just_model": False,
+    "checkpoint": "./checkpoint/2HG-MSRB-D_DW-PELEE_c64/2021-12-16/0.962_PCK_84epoch.pt",
+    "save_root": "./checkpoint/MSRB-D-DW-PELEE/"
 }

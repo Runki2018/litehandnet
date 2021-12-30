@@ -94,7 +94,7 @@ def draw_point(img, keypoints):
     color_list = [(255, 0, 0), (0, 255, 255), (255, 0, 255), (255, 140, 0), (0, 0, 255), (0, 255, 0)]  # RGB
     for i, (r, g, b) in enumerate(color_list):
         color_list[i] = (b, g, r)  # BGR
-    point_size = 3
+    point_size = 2
     thickness = 8  # 可以为 0 、4、8
     for i in range(n_kpts):
         if i == 0:
