@@ -4,7 +4,11 @@ HG_cfg = {
     # model structure:
     'n_joints': 21,  # keypoints + region map
     'bn_momentum': 0.1,
-    'need_region_map': True,  # 预测 region map
+    'gt_mode': {
+        'region_map': False,
+        'just_kpts': True,
+        'center_map': False
+        },  # 预测 region map
     'image_size': (256, 256), # (352, 352), 
     "hm_size": (64, 64, 64),  # (16, 16, 32, 64), (22, 22, 44, 88),
     "hm_sigma": (2, 2, 2), # (2, 2), 

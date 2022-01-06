@@ -3,7 +3,8 @@
 # from config.RKNet_mpii_cfg import current_config as config_dict
 # from config.RKNet_mpii_SA_cfg import current_config as config_dict
 # from config.freihand_cfg.pose_estimation.srhandnet_cfg import srhandnet_cfg as config_dict
-from config.RKNet_handset_cfg import HG_cfg as config_dict
+# from config.RKNet_handset_cfg import HG_cfg as config_dict
+from config.Center_simDR_cfg import HG_cfg as config_dict
 
 
 mpii = {
@@ -95,12 +96,12 @@ DATASET = Dataset[config_dict["dataset"]]
 
 # used in HeatmapParser.py
 parser_cfg = {
-    "num_candidates": 200,  # NMS前候选框个数，对应于取中心点热图前k个峰值点。
-    "max_num_bbox": 4,    # 一个关键点热图对于一张tag map
+    "num_candidates": 100,  # NMS前候选框个数，对应于取中心点热图前k个峰值点。
+    "max_num_bbox": 1,    # 一张图片保留多少个预测框 == 最大预测目标数
     "nms_kernel": 5,        # 抑制掉热图峰值点区域范围
     "nms_stride": 1,
     "nms_padding": 2,
-    "detection_threshold": 0.2,  # 关键点热图得分
+    "detection_threshold": 0.2,  # 框中心点是目标的阈值
     "iou_threshold": 0.6,  # NMS去掉重叠框的IOU阈值
     "tag_threshold": 1.,
     "use_detection_val": True,

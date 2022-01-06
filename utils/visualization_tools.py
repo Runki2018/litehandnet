@@ -3,6 +3,32 @@ import os
 import json
 import numpy as np
 import matplotlib.pyplot as plt
+import torch
+
+
+def draw_centermap(centermap, title='centermap'):
+    """可视化Centermap
+
+    Args:
+        centermap (tensor): [1, 5, h, w], batch = 1
+        title (str, optional): [description]. Defaults to 'centermap'.
+    """
+    assert centermap.ndim == 4
+    hm = dict(center=centermap[0, 0:1],
+            w=centermap[0, 1:2],
+            h=centermap[0, 2:3],
+            offset_x=centermap[0, 3:4],
+            offset_y=centermap[0, 4:5])
+    
+    out = []
+    for i, (name, heatmap) in enumerate(hm.items()):
+        heatmap = heatmap.permute(1, 2, 0)
+        heatmap = heatmap.cpu().detach().numpy()
+        heatmap = cv.normalize(heatmap, None, alpha=0, beta=255, norm_type=cv.NORM_MINMAX, dtype=cv.CV_8U)
+        heatmap = cv.applyColorMap(heatmap, cv.COLORMAP_JET)
+        out.append(heatmap)
+        
+    return out
 
 
 def draw_heatmaps(hms, title="heatmap", k=2):

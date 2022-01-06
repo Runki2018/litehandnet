@@ -33,7 +33,7 @@ class HeatmapParser:
     def __init__(self):
         self.dataset = DATASET
         self.n_joints = cfg["n_joints"]
-        self.image_size = cfg["new_size"]  # 输入网络的图像的大小
+        self.image_size = cfg["image_size"]  # 输入网络的图像的大小
         self.num_candidates = parser_cfg["num_candidates"]  # NMS前候选框个数=取中心点热图峰值的个数
         self.max_num_bbox = parser_cfg["max_num_bbox"]  # 一张图片上最多保留的目标数
 

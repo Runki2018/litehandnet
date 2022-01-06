@@ -1,4 +1,3 @@
-from re import S
 from threading import main_thread
 import torch
 from torch import nn
@@ -444,9 +443,8 @@ class HourglassNet_SA(nn.Module):
         basic_block=ME_att):
         super(HourglassNet_SA, self).__init__()
         inp_dim = cfg['main_channels']
-        oup_dim = cfg['n_joints'] + int(cfg['need_region_map']) * 3
+        oup_dim = cfg['n_joints'] + int(cfg['gt_mode']['region_map']) * 3
         
-
         # self.pre = nn.Sequential(
         #     # Conv(3, 64, 7, 2, bn=True, relu=True),
         #     nn.Conv2d(3, 64, 7, 2, 3, bias=False),
@@ -471,10 +469,6 @@ class HourglassNet_SA(nn.Module):
             ) for _ in range(nstack)])
 
         self.outs = nn.ModuleList([Conv(inp_dim, oup_dim, 1, relu=False, bn=False) for _ in range(nstack)])
-        
-
-        self.mid_layer = nn.ModuleList([
-            SELayer(inp_dim, reduction=8) for _ in range(nstack -1)])
 
         self.merge_features = nn.ModuleList([Merge(inp_dim, inp_dim) for _ in range(nstack - 1)])
         self.merge_preds = nn.ModuleList([Merge(oup_dim, inp_dim) for _ in range(nstack - 1)])

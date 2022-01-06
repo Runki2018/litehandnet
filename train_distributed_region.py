@@ -249,18 +249,14 @@ class Main:
                     ap_list.append(ap)
 
                 PCK = [p / self.test_loader.__len__() for p in pck]
-                # PCK_mean = reduce_value(PCK[-1], average=True)
-                # print(f"{PCK_mean=}")
                 
                 # 记录训练数据
                 for i, pck in enumerate(PCK):
                     print(f"{i}: { pck=}")
 
-                # print(f"{ap_list=}")
                 ap_final = float(np.mean(ap_list))
                 print(f"AP = {ap_final}")
 
-                # print(f"{ap50_list=}")
                 ap50_final = float(np.mean(ap50_list))
                 print(f"AP50 = {ap50_final}")
 

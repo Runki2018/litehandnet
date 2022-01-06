@@ -3,6 +3,8 @@ from re import S
 import torch
 from torch import nn
 from loss.heatmapLoss import FocalLoss, RegionLoss, MaskLoss, L2Loss, JointsMSELoss, SmoothL1Loss
+from loss.centernet_simdr_loss import focal_loss, reg_l1_loss, KLDiscretLoss
+import torch.nn.functional as F
 from config.config import config_dict as cfg
 
 loss_func = {
@@ -15,6 +17,41 @@ loss_func = {
     'SmoothL1Loss': SmoothL1Loss(),
     'JointsLoss': JointsMSELoss(),
 }
+
+class Center_SimDR_Loss(nn.Module):
+    """
+    MTL多任务学习，自动权重调节: https://zhuanlan.zhihu.com/p/367881339
+    
+    """
+    def __init__(self, num_loss=4, auto_weights=False):
+        super().__init__()
+        self.kpts_loss = KLDiscretLoss()
+        params = torch.ones(num_loss, requires_grad=True)
+        if auto_weights:
+            self.p = nn.Parameter(params)   # TODO:将这个参数也放入优化器的参数优化列表中
+        self.auto_weights = auto_weights
+    
+    def forward(self, centermap, target_centermap, mask,
+                output_x, output_y, target_x, target_y, target_weight):
+        
+        center_loss = focal_loss(centermap[:, 0:1], target_centermap[:, 0:1])
+        wh_loss = reg_l1_loss(centermap[:, 1:3], target_centermap[:, 1:3], mask)
+        offset_loss = reg_l1_loss(centermap[:, 3:], target_centermap[:, 3:], mask)
+        
+        kpts_loss = self.kpts_loss(output_x, output_y, target_x, target_y, target_weight)
+        
+        # TODO: 这个损失函数的比例怎么调节？ 用这个正则化，会不会直接学成 p = 0，使得Loss=0？
+        loss_list = [center_loss, wh_loss, offset_loss, kpts_loss]
+        loss_sum = 0
+        if self.auto_weights:
+            for i, loss in enumerate(loss_list):
+                c2 = self.p[i] ** 2  # 正则项平方非负，后面再用log(1+c2)，使c2接近0
+                loss_sum += 0.5 / c2 * loss + torch.log(1 + c2)
+        else:
+            loss_sum = sum(loss_list)
+        
+        loss_list = [l.item() for l in loss_list]
+        return loss_sum, loss_list
 
 class HMLoss(nn.Module):
     """
@@ -78,14 +115,14 @@ class HM_Region_Loss(nn.Module):
 
 if __name__ == '__main__':
     from models.RKNet import HandNetSoftmax
-    from data import Loader
+    from data import RegionLoader
     from config.config import DATASET
 
     model = HandNetSoftmax()
     model.load_state_dict(torch.load("../weight/0.693_mPCK_handnet1.pt")["model_state"])
     criterion = ()
     print("preparing data...")
-    dataset, test_loader = Loader(batch_size=1, num_workers=1).test(
+    dataset, test_loader = RegionLoader(batch_size=1, num_workers=1).test(
         DATASET["root"], DATASET["train_file"])
     print("done!")
 
