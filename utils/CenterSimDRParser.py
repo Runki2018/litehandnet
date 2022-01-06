@@ -92,10 +92,10 @@ class ResultParser:
                     mask_y[y1: y2] = True                    
                     
                     # todo: 取bbox范围内峰值点
-                    # score_x, x = torch.topk(x_vectors[i] * mask_x, k=1)  # (n_joints, k)
-                    # score_y, y = torch.topk(y_vectors[i] * mask_y, k=1)
-                    score_x, x = torch.topk(x_vectors[i], k=1)  # (n_joints, k)
-                    score_y, y = torch.topk(y_vectors[i], k=1)
+                    score_x, x = torch.topk(x_vectors[i] * mask_x, k=1)  # (n_joints, k)
+                    score_y, y = torch.topk(y_vectors[i] * mask_y, k=1)
+                    # score_x, x = torch.topk(x_vectors[i], k=1)  # (n_joints, k)
+                    # score_y, y = torch.topk(y_vectors[i], k=1)
                                       
                     x, y = x / self.simdr_split_ratio, y / self.simdr_split_ratio
                     score = (score_x + score_y) / 2
