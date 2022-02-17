@@ -1,11 +1,14 @@
 from functools import total_ordering
 import time
+from cv2 import KeyPoint
 
 import torch
 import numpy as np
 from collections import defaultdict
 from utils.bbox_metric import xywh2xyxy, box_iou, bbox_iou
 from utils.evaluation import count_ap
+from utils.heatmap_post_processing import adjust_keypoints_by_DARK, adjust_keypoints_by_offset
+from data.handset.dataset_function import get_bbox
 import torchvision
 
 from config.config import DATASET, parser_cfg, config_dict as cfg
@@ -17,6 +20,11 @@ class ResultParser:
     """
 
     def __init__(self):
+        kernel_size = parser_cfg["region_avg_kernel"]
+        self.avg_pool = torch.nn.AvgPool2d(kernel_size,
+                                           parser_cfg["region_avg_stride"],
+                                           (kernel_size - 1) // 2)
+        
         self.max_pool = torch.nn.MaxPool2d(parser_cfg["nms_kernel"],
                                            parser_cfg["nms_stride"],
                                            parser_cfg["nms_padding"])
@@ -58,8 +66,25 @@ class ResultParser:
         vector *= mask
         return vector
 
+    def get_coordinates_from_heatmaps(self, heatmaps):
+        """获取关键点在热图上的坐标"""
+        
+        # todo 怎么分组？
+        batch, n_joints, h, w = heatmaps.shape
+        top_val, top_idx = torch.topk(heatmaps.reshape((batch, n_joints, -1)), k=1)
+
+        kpts = torch.zeros((batch, self.max_num_bbox, n_joints, 3), dtype=torch.float32).to(heatmaps.device)
+        # batch_kpts = torch.zeros((batch, n_joints, 3))
+        kpts[..., 0] = (top_idx % w).reshape((batch, 1, n_joints))  # x
+        kpts[..., 1] = torch.div(top_idx, w, rounding_mode='trunc').reshape((batch, 1, n_joints))  # y
+        # batch_kpts[..., 1] = (top_idx // w).reshape((batch, n_joints))  # y
+        kpts[..., 2] = top_val.reshape((batch, 1, n_joints))  # c: score
+
+        return kpts
+
+    
     # 关键点解析
-    def get_coordinates(self, x_vectors, y_vectors, pred_bboxes):
+    def get_coordinates_from_vectors(self, x_vectors, y_vectors, pred_bboxes):
         """获取关键点在1D 向量上的坐标"""
         # TODO: 怎么解析关键点？ 直接取框内最大值点，不考虑是否框有重合（待优化）
         # （1） 如果两个框没有相交，直接取框范围内最大得分点
@@ -77,19 +102,22 @@ class ResultParser:
         for i in range(batch):
             if pred_bboxes[i] is not None:
                 for j, bbox in enumerate(pred_bboxes[i]):
+                    # print(f"1\t{bbox=}")
                     bbox = np.array(bbox) * self.simdr_split_ratio
                     bbox = np.round(bbox)
+                    # print(f"2\t{bbox=}")
 
-                    x1, y1 = bbox[:2] - bbox[2:4]
-                    x2, y2 = bbox[:2] + bbox[2:4]
+                    x1, y1 = bbox[:2] - bbox[2:4] / 2
+                    x2, y2 = bbox[:2] + bbox[2:4] / 2
                     x1, y1 = max(int(x1), 0), max(int(y1), 0)
                     x2, y2  = min(int(x2), w), min(int(y2), h)
+                    # print(f"{x1=}\t{x2=}\t{y1=}\t{y2=}")
                     
                     mask_x = torch.zeros((n_joints, w), dtype=torch.bool).to(x_vectors.device)
-                    mask_x[x1: x2] = True
+                    mask_x[:, x1: x2] = True
                     
                     mask_y = torch.zeros((n_joints, h), dtype=torch.bool).to(x_vectors.device)
-                    mask_y[y1: y2] = True                    
+                    mask_y[:, y1: y2] = True                    
                     
                     # todo: 取bbox范围内峰值点
                     score_x, x = torch.topk(x_vectors[i] * mask_x, k=1)  # (n_joints, k)
@@ -102,46 +130,46 @@ class ResultParser:
                     coors[i, j] = torch.cat([x, y, score], dim=1)
                     
         return coors
-                    
-    def candidate_bbox(self, center_hm, wh_hm, offset_hm):
+    
+    def candidate_bbox(self, center_maps, size_maps):
         """
             根据中心点热图和宽高热图，得到k个候选框
-        :param center_hm: 中心点热图: (batch, 1,  hm_size, hm_size)
-        :param wh_hm: 宽高热图: (batch, 2, hm_size, hm_size)， second dim = (width, height)
-        :param offset_hm: 中心点偏置: (tuple)
+        :param center_maps: 中心点热图： (batch, 1,  hm_size, hm_size)
+        :param size_maps: 宽高热图： (batch, 2, hm_size, hm_size)， second dim = (width, height)
         :return: (batch, k, 5), last dim is (x_center, y_center, width, height, confidence)
         """
-        batch, _, h, w = center_hm.shape
-        candidates = torch.zeros((batch, self.num_candidates, 5), dtype=torch.float32).to(center_hm.device)
+        device = center_maps.device
+        batch, _, h, w = center_maps.shape
+        candidates = torch.zeros((batch, self.num_candidates, 5), dtype=torch.float32).to(device)
 
         # get center points
-        center_hm = center_hm.reshape((batch, -1))  # (batch, hm_size * hm_size)
-        top_val, top_idx = torch.topk(center_hm, k=self.num_candidates)  # (batch, k), (batch, k)
+        top_val, top_idx = torch.topk(center_maps.reshape((batch, -1)), k=self.num_candidates)  # (batch, k), (batch, k)
 
-        # get x, y on center heatmap
         candidates[..., 0] = top_idx % w  # x
-        candidates[..., 1] = torch.div(top_idx, w, rounding_mode='trunc')  # top_idx // w  
+        candidates[..., 1] = torch.div(top_idx, w, rounding_mode='trunc')  # top_idx // w
 
-        # get width and height form wh heatmap and add offset into x,y
+        # get width and height form size_maps
+        size_maps = self.avg_pool(size_maps)  # 对预测的宽高热图进行大小不变的平均池化，然取宽高值只需要取中心点处的值
         for bi in range(batch):
-            for ki in range(self.num_candidates):          
+            for ki in range(self.num_candidates):
                 x, y = candidates[bi, ki, :2]
                 x, y = int(x), int(y)
-                
-                candidates[bi, ki, 2] = wh_hm[bi, 0, y, x]  # get width ratio 0~1
-                candidates[bi, ki, 3] = wh_hm[bi, 1, y, x]  # get height ratio 0~1
-                
-                candidates[bi, ki, 0] += offset_hm[bi, 0, y, x]   # x + offset_x
-                candidates[bi, ki, 1] += offset_hm[bi, 1, y, x]   # y + offset_y
-                
+                candidates[bi, ki, 2] = size_maps[bi, 0, y, x]  # get region width ratio 0~1
+                candidates[bi, ki, 3] = size_maps[bi, 1, y, x]  # get region height ratio 0~1
         candidates[..., 2:4] = candidates[..., 2:4].clip(0, 0.99)  # a ratio: 0~1
         candidates[..., 4] = top_val  # confidence
-
+        
+        kpts = candidates[..., :2]
+        kpts = adjust_keypoints_by_DARK(kpts[:,:, None], center_maps)
+        candidates[..., :2] = torch.as_tensor(kpts[:, :, 0, :], device=device) 
+ 
+ 
         # resize center x,y and size w,h from heatmap to original image
-        candidates[..., :2] *= self.feature_stride.to(center_hm.device)
-        candidates[..., 2:4] *= self.image_size.to(center_hm.device)  # width and height of bbox
-
+        candidates[..., :2] *= self.feature_stride.to(device)
+        candidates[..., 2:4] *= self.image_size.to(device)  # width and height of bbox             
         return candidates
+        
+
 
     def non_max_suppression(self, candidates):
         """
@@ -182,10 +210,10 @@ class ResultParser:
 
         return output
 
-    def parse(self, centermap, pred_x=None, pred_y=None,):    
+    def parse(self, heatmaps, pred_x=None, pred_y=None, bbox=None):    
         """
 
-        :param centermap: (batch, 5, h, w), h 和 w是热图的的宽高，默认是64
+        :param heatmaps: (batch, 5, h, w), h 和 w是热图的的宽高，默认是64
         :param pred_x:  (batch, n_joints, img_w * k), k is simdr_split_ratio
         :param pred_y:  (batch, n_joints, img_h * k)
         :return:  返回原图上的关键点坐标和预测框
@@ -193,25 +221,36 @@ class ResultParser:
                 list: (n_images, n_boxes, 5)
         """
         # 1： 获取原图上的边界框
-        center_hm = centermap[:, 0:1]       # (batch, 1, h, w)
-        wh_hm     = centermap[:, 1:3]       # (batch, 2, h, w)
-        offset_hm = centermap[:, 3:]        # (batch, 2, h, w)
+        center_hm = heatmaps[:, 0:1]        # (batch, 1, h, w)
+        size_hm = heatmaps[:, 1:3]         # (batch, 2, h, w)
+        kpts_hm = heatmaps[:, 3:]       # (batch, 21, h, w)
         
         center_hm = self.heatmap_nms(center_hm)  # 去除部分峰值
-        candidates = self.candidate_bbox(center_hm, wh_hm, offset_hm)
+        candidates = self.candidate_bbox(center_hm, size_hm)
         pred_bboxes = self.non_max_suppression(candidates)  # list
 
         # 2： 获取关键点
-        pred_kpts = self.get_coordinates(pred_x, pred_y, pred_bboxes)
+        # 在预测框内取峰值
+        bbox = bbox.detach().cpu()
+        # bbox = torch.from_numpy(bbox) 
+        limit_vector_bbox = bbox  # todo 如果是预测框则为 pred_bboxes
+        vector2kpt = self.get_coordinates_from_vectors(pred_x, pred_y, limit_vector_bbox)
+        # 在真值框内取峰值
+        vb2kpt = self.get_coordinates_from_vectors(pred_x, pred_y, bbox)
+        
+        hm2kpt = self.get_coordinates_from_heatmaps(kpts_hm)
+        device = hm2kpt.device
+        # hm2kpt = adjust_keypoints_by_offset(hm2kpt.clone(), kpts_hm)
+        hm2kpt = adjust_keypoints_by_DARK(hm2kpt.clone(), kpts_hm)
+        hm2kpt = torch.as_tensor(hm2kpt, device=device)
+        hm2kpt[:, :, :, :2] *= self.feature_stride.to(device)  # (batch, n_max_object, n_joints, 3)
 
-        return pred_kpts, pred_bboxes
+        return vector2kpt, vb2kpt, hm2kpt, pred_bboxes
 
     @staticmethod
     def evaluate_ap(pred_bboxes, gt_bboxes, iou_thr=None):
         gt_bboxes = gt_bboxes.tolist() if isinstance(gt_bboxes, torch.Tensor) else gt_bboxes
         ap50, ap = count_ap(pred_boxes=pred_bboxes, gt_boxes=gt_bboxes, iou_threshold=iou_thr)
-        # print(pred_bboxes[0])
-        # print(gt_bboxes[0])
 
         return ap50, ap
 
@@ -264,7 +303,7 @@ class ResultParser:
         
         avg_pck = sum(pck_list) / len(pck_list) if len(pck_list) != 0 else 0
         return avg_pck
-            
+
 # ----------------------------------------------
 
 

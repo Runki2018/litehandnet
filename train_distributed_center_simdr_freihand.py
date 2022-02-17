@@ -244,7 +244,8 @@ class Main:
                 for meta in tqdm(self.test_loader, desc="testing "):
                     meta = [gt.to(self.device) for gt in meta]
                     img, target_x, target_y, target_weight, kpts_hm, bbox, gt_kpts = meta = meta
-                    hm, pred_x, pred_y = self.model(img)
+                    # hm, pred_x, pred_y = self.model(img)
+                    hm, pred_x, pred_y = self.model(img), target_x, target_y
                     
                     # 结果解析，得到原图关键点和边界框
                     vector2kpt, vb2kpt, hm2kpt, pred_bboxes = self.result_parser.parse(hm[-1], pred_x, pred_y, bbox)
@@ -337,7 +338,7 @@ class Main:
                 self.epoch = epoch
 
                 self.train_sampler.set_epoch(epoch)
-                self.train()
+                # self.train()
                 if (epoch % cfg['eval_interval']) == 0:
                     self.test()
             if self.rank == 0:

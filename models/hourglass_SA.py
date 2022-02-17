@@ -5,6 +5,7 @@ from utils.training_kits import load_pretrained_state
 from config.config import config_dict as cfg
 from models.attention import SELayer, NAM_Channel_Att
 from models.layers import DWConv, DWConvBlock
+from einops import rearrange, repeat
 
 
 class Merge(nn.Module):
@@ -47,17 +48,15 @@ class Residual(nn.Module):
         self.conv2 = Conv(int(out_dim / 2), int(out_dim / 2), 3, relu=False)
         self.bn3 = nn.BatchNorm2d(int(out_dim / 2))
         self.conv3 = Conv(int(out_dim / 2), out_dim, 1, relu=False)
-        self.skip_layer = Conv(inp_dim, out_dim, 1, relu=False)
+        
         if inp_dim == out_dim:
-            self.need_skip = False
+            self.skip_layer = nn.Identity()
         else:
-            self.need_skip = True
+            self.skip_layer = Conv(inp_dim, out_dim, 1, relu=False)
 
     def forward(self, x):
-        if self.need_skip:
-            residual = self.skip_layer(x)
-        else:
-            residual = x
+        residual = self.skip_layer(x)
+  
         out = self.bn1(x)
         out = self.relu(out)
         out = self.conv1(out)
@@ -246,6 +245,7 @@ class Hourglass_module(nn.Module):
             self.low2 = Hourglass_module(n - 1, nf)
         else:
             self.low2 = basic_block(nf, nf)
+            # self.low2 = Residual(nf, nf)
         self.low3 = basic_block(nf, f)
         self.up2 = nn.Upsample(scale_factor=2, mode='nearest')
 
@@ -354,7 +354,55 @@ class ME_att(nn.Module):
         out = out * self.att(out).view(b, c, 1, 1)
         # out = self.nam_channel_attention(out)
         return out
-    
+
+class ME_att_lite(nn.Module):
+    """
+    https://blog.csdn.net/KevinZ5111/article/details/104730835?utm_medium=distribute.pc_aggpage_search_result.none-task-blog-2~aggregatepage~first_rank_ecpm_v1~rank_v31_ecpm-4-104730835.pc_agg_new_rank&utm_term=block%E6%94%B9%E8%BF%9B+residual&spm=1000.2123.3001.4430
+    """
+    def __init__(self, in_c, out_c):
+        super().__init__()
+
+        mid_c = in_c // 2
+        self.conv1 = BRC(in_c, mid_c, 1, 1, 0)
+
+        self.mid1_conv = nn.Sequential(
+                DWConv(mid_c, mid_c // 2),
+                DWConv(mid_c // 2, mid_c // 2)
+            )
+
+        self.mid2_conv =  nn.Sequential(
+                DWConv(mid_c, mid_c // 2, dilation=2, padding=2),
+                DWConv(mid_c // 2, mid_c // 2),
+                )
+  
+        self.conv3 = DWConvBlock(mid_c * 2, out_c)
+        self.att = nn.Sequential(
+                            nn.AdaptiveAvgPool2d((3,3)),
+                            nn.BatchNorm2d(out_c),
+                            nn.ReLU(),
+                            nn.Conv2d(out_c, out_c, 3, 1, 0, groups=out_c),
+                            nn.Flatten(),
+                            nn.Dropout(p=0.3),
+                            nn.Linear(out_c, out_c),
+                            nn.Sigmoid(),  
+                            )
+        # self.nam_channel_attention = NAM_Channel_Att(channels=out_c)
+
+    def forward(self, x):
+        m = self.conv1(x)
+        m1 = self.mid1_conv(m)
+        m2 = self.mid2_conv(m)
+        m = torch.cat([m1, m2], dim=1)
+
+        # features = self.conv2(m) + x
+        features = m + x
+        out = self.conv3(features)
+        b, c, _, _ = out.shape
+        out = out * self.att(out).view(b, c, 1, 1)
+        # out = self.nam_channel_attention(out)
+        return out
+
+ 
 class my_pelee_stem(nn.Module):
     """ 我在Conv1中再加了一个3x3卷积，来提高stem的初始感受野"""
     def __init__(self, out_channel=256, min_mid_c=32):
@@ -379,7 +427,8 @@ class my_pelee_stem(nn.Module):
             nn.ReLU(True)
         )
         self.branch2 = nn.MaxPool2d(2, 2, ceil_mode=True)
-        self.conv1x1 = nn.Sequential(
+        
+        self.conv2 = nn.Sequential(   
             nn.Conv2d(mid_channel * 2, out_channel, 1, 1, 0),
             nn.BatchNorm2d(out_channel),
             nn.ReLU(True)
@@ -390,7 +439,7 @@ class my_pelee_stem(nn.Module):
         b1 = self.branch1(out)
         b2 = self.branch2(out)
         out = torch.cat([b1, b2], dim=1)
-        out = self.conv1x1(out)
+        out = self.conv2(out)
         return out
 
 class higher_output_layer(nn.Module):
@@ -440,21 +489,11 @@ class higher_output_MS_layer(nn.Module):
 
 class HourglassNet_SA(nn.Module):
     def __init__(self, nstack=cfg['nstack'], increase=cfg['increase'],
-        basic_block=ME_att):
+        basic_block=ME_att_lite):
         super(HourglassNet_SA, self).__init__()
         inp_dim = cfg['main_channels']
-        oup_dim = cfg['n_joints'] + int(cfg['gt_mode']['region_map']) * 3
+        oup_dim = cfg['n_joints'] + 3
         
-        # self.pre = nn.Sequential(
-        #     # Conv(3, 64, 7, 2, bn=True, relu=True),
-        #     nn.Conv2d(3, 64, 7, 2, 3, bias=False),
-        #     nn.BatchNorm2d(64),
-        #     nn.ReLU(inplace=True),
-        #     Residual(64, 128),
-        #     nn.MaxPool2d(2, 2),
-        #     Residual(128, 128),
-        #     Residual(128, inp_dim)
-        # )
         self.pre = my_pelee_stem(out_channel=inp_dim)
 
         self.hgs = nn.ModuleList([
@@ -468,7 +507,7 @@ class HourglassNet_SA(nn.Module):
                 Conv(inp_dim, inp_dim, 1, bn=True, relu=True)
             ) for _ in range(nstack)])
 
-        self.outs = nn.ModuleList([Conv(inp_dim, oup_dim, 1, relu=False, bn=False) for _ in range(nstack)])
+        self.outs = nn.ModuleList([Conv(inp_dim, oup_dim, 3, relu=False, bn=False) for _ in range(nstack)])
 
         self.merge_features = nn.ModuleList([Merge(inp_dim, inp_dim) for _ in range(nstack - 1)])
         self.merge_preds = nn.ModuleList([Merge(oup_dim, inp_dim) for _ in range(nstack - 1)])
@@ -477,11 +516,18 @@ class HourglassNet_SA(nn.Module):
         # for p in self.parameters():  # froze weight
         #     p.requires_grad = False
         
-        self.higher_out = higher_output_layer(inp_dim, oup_dim) if cfg['higher_output'] else None
+        image_size = cfg['image_size']  # (w, h)
+        k = cfg['simdr_split_ratio']  # default k = 2 
+        in_features = int(image_size[0] * image_size[1] / (8 ** 2))  # 下采样率是4，所以除以16
+        # self.vector_feature = Residual(inp_dim, cfg['n_joints'])  
+        self.pred_x = nn.Linear(in_features, int(image_size[0] * k)) 
+        self.pred_y = nn.Linear(in_features, int(image_size[1] * k))
+        self.image_size = image_size
 
     def forward(self, imgs):
         x = self.pre(imgs)
 
+        # hm_preds, pred_x , pred_y = [], [], []
         hm_preds = []
         for i in range(self.nstack):
             hg = self.hgs[i](x)
@@ -491,11 +537,17 @@ class HourglassNet_SA(nn.Module):
             if i < self.nstack - 1:
                 x = x + self.merge_preds[i](hm_preds[-1]) + self.merge_features[i](feature)
         
-        if self.higher_out is not None:
-            hm_preds.append(self.higher_out(x))
+        # predict keypoints
+        if imgs.shape[-1] != self.image_size[0]:
+            kpts = hm_preds[-1][:, 3:]
+            # kpts = self.vector_feature(feature)
+            kpts = rearrange(kpts, 'b c h w -> b c (h w)')
+            pred_x = self.pred_x(kpts)  # (b, c, w * k)
+            pred_y = self.pred_y(kpts)  # (b, c, h * k)   
+        else:
+            pred_x, pred_y = None, None
+        return hm_preds, pred_x, pred_y
 
-        return hm_preds
- 
     def load_weights(self):
         if self.nstack == 2:
             # pre_trained = './weight/2HG_checkpoint.pt'

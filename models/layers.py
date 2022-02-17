@@ -131,15 +131,14 @@ class Residual(nn.Module):
             nn.ReLU(),
             nn.Conv2d(mid_dim, out_dim, 1, 1),
         )
-        self.skip_layer = Conv(in_dim, out_dim, 1, relu=False)
 
-        self.need_skip = False if in_dim == out_dim else True
+        if in_dim == out_dim:
+            self.skip_layer = nn.Identity()  # 不做处理，直接相加
+        else: 
+            self.skip_layer = Conv(in_dim, out_dim, 1, relu=False)
 
     def forward(self, x):
-        if self.need_skip:
-            residual = self.skip_layer(x)
-        else:
-            residual = x
+        residual = self.skip_layer(x)
 
         out = self.ConvBlock(x)
         out += residual

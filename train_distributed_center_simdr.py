@@ -108,7 +108,7 @@ class Main:
         #                                                       min_lr=cfg["lr"] * 0.001, cooldown=10)
 
         # 自定义的逐周期递减正弦学习率曲线
-        T, lr_gamma, min_lr = cfg['T'], cfg['lr_gamma'], cfg['min_lr'] / args.lr
+        T, lr_gamma, min_lr = cfg['T'], cfg['lr_gamma'], cfg['min_lr']
         lambda1 = lambda epoch: np.cos((epoch % (T + (epoch / T)) / (T + (epoch / T))) * np.pi / 2) * (lr_gamma ** (epoch / T)) + min_lr
         self.scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lambda1)
 

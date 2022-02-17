@@ -33,6 +33,7 @@ freihand = {
     "root": r"/home/user/PycharmProjects/Dataset/freiHand/",
     "test_file": r"/home/user/PycharmProjects/Dataset/freiHand/annotations/freihand_test.json",
     "train_file": r"/home/user/PycharmProjects/Dataset/freiHand/annotations/freihand_train.json",
+    # "test_file": r"/home/user/PycharmProjects/Dataset/freiHand/annotations/freihand_train.json",
     "thr_list": [0.12740034726360222, 0.17060353893099983, 0.21433420109795465],
     "n_bbox": [19364, 34144, 35592, 15092],
 }
@@ -96,20 +97,23 @@ DATASET = Dataset[config_dict["dataset"]]
 
 # used in HeatmapParser.py
 parser_cfg = {
-    "num_candidates": 100,  # NMS前候选框个数，对应于取中心点热图前k个峰值点。
+    "num_candidates": 10,  # NMS前候选框个数，对应于取中心点热图前k个峰值点。
     "max_num_bbox": 1,    # 一张图片保留多少个预测框 == 最大预测目标数
     "nms_kernel": 5,        # 抑制掉热图峰值点区域范围
     "nms_stride": 1,
     "nms_padding": 2,
-    "detection_threshold": 0.2,  # 框中心点是目标的阈值
+    "detection_threshold": 0.1,  # 框中心点是目标的阈值
     "iou_threshold": 0.6,  # NMS去掉重叠框的IOU阈值
     "tag_threshold": 1.,
     "use_detection_val": True,
     "ignore_too_much": True,
 
-    "bbox_factor": 1.1,  # 匹配关键点的限制区域为预测框的factor倍区域内
+    "bbox_factor": 1.0,  # 匹配关键点的限制区域为预测框的factor倍区域内
     "bbox_k": 3,   # 限制区域内每张热图取得分前k个候选点。
     "region_avg_kernel": 3,
     "region_avg_stride": 1,
+    
+    'blue_kernel': 11,  # 高斯模糊的核大小，DARK 默认为11
+    
 }
 

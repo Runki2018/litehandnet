@@ -159,8 +159,8 @@ def _get_wh(wh_region_maps, bi, center):
     x2 = br[0].clip(min=0, max=heatmap_size - 1)  # (1,)
     y1 = ul[1].clip(min=0, max=heatmap_size - 1)
     y2 = br[1].clip(min=0, max=heatmap_size - 1)
-    # todo: check the c and s in situation of multiple hands
-    # todo: use NMS to get multiple c ,and then to get s according to c
+    # TODO: check the c and s in situation of multiple hands
+    # TODO: use NMS to get multiple c ,and then to get s according to c
     gamma_x = wh_region_maps[bi, 0, y1:y2, x1:x2].flatten().mean(dim=-1)
     gamma_y = wh_region_maps[bi, 1, y1:y2, x1:x2].flatten().mean(dim=-1)
     gamma_x = torch.clip(gamma_x, 0, 1)  # 0 <= x <= 1

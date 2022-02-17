@@ -11,14 +11,14 @@ class KLDiscretLoss(nn.Module):
     """
     def __init__(self):
         super(KLDiscretLoss, self).__init__()
-        self.LogSoftmax = nn.LogSoftmax(dim=1)  # [B,LOGITS]
-        self.criterion_ = nn.KLDivLoss(reduction='none')
-        # self.criterion_ = nn.SmoothL1Loss(reduction='mean')
+        # self.LogSoftmax = nn.LogSoftmax(dim=1)  # [B,LOGITS]
+        # self.criterion_ = nn.KLDivLoss(reduction='none')
+        self.criterion_ = nn.SmoothL1Loss(reduction='mean')
 
     def criterion(self, dec_outs, labels):
-        scores = self.LogSoftmax(dec_outs)
-        loss = torch.mean(self.criterion_(scores, labels), dim=1)
-        # loss = self.criterion_(dec_outs, labels)
+        # scores = self.LogSoftmax(dec_outs)
+        # loss = torch.mean(self.criterion_(scores, labels), dim=1)
+        loss = self.criterion_(dec_outs, labels)
         return loss
 
     def forward(self, output_x, output_y, target_x, target_y, target_weight):

@@ -12,7 +12,6 @@ loss_func = {
     "MaskLoss": MaskLoss(),
     "RegionLoss": RegionLoss(),
     "MSE": nn.MSELoss(),
-    "SmoothL1": nn.SmoothL1Loss(),
     'L2Loss': L2Loss(),
     'SmoothL1Loss': SmoothL1Loss(),
     'JointsLoss': JointsMSELoss(),
@@ -70,21 +69,36 @@ class HMLoss(nn.Module):
          param:  各个损失的占比权重
         """
         super(HMLoss, self).__init__()
-        self.kpt_loss = loss_func[cfg["kpt_loss"]]
+        self.hm_loss = loss_func[cfg["kpt_loss"]]
+        self.vector_loss = KLDiscretLoss()
         # self.mask_loss = loss_func[cfg["mask_loss"]]
         # self.region_loss = loss_func[cfg["region_loss"]]
-        self.params = cfg["param"]
-        self.n_out = len(self.params)
+        # self.params = cfg["param"]
+        # self.n_out = len(self.params)
 
-    def forward(self, hm_list, hm_gts, hm_weight=None):
+    def forward(self, pred_hm, gt_hm, 
+                output_x=None, output_y=None,
+                target_x=None, target_y=None,
+                target_weight=None, cd=False):
         
-        total_loss = 0
-        for i in range(self.n_out):
-            if self.params[i] != 0:
-                total_loss = total_loss + \
-                    self.params[i] * self.kpt_loss(hm_list[i], hm_gts, hm_weight)
+        
+        if not cd:  # 非循环训练，输入分辨率减半
+            hm_loss = 0
+            for hm in pred_hm:
+                # region_loss += self.hm_loss(hm[:,:3], gt_hm[:, :3])
+                # kpts_loss += self.hm_loss(hm[:, 3:], gt_hm[:, 3:], target_weight)
+                hm_loss += self.hm_loss(hm, gt_hm)  
+            loss = hm_loss
+            loss_dict = dict(hm=hm_loss.item())
+        else:
+            vector_loss = self.vector_loss(output_x, output_y, target_x, target_y, target_weight)
+            loss = vector_loss
+            loss_dict = dict(vector=vector_loss.item())
+            
+        # loss = region_loss + kpts_loss + vector_loss
+        # loss_dict = dict(region=region_loss.item(), kpts=kpts_loss.item(), vector=vector_loss.item())
 
-        return total_loss
+        return loss, loss_dict
 
 class HM_Region_Loss(nn.Module):
     """
@@ -96,22 +110,16 @@ class HM_Region_Loss(nn.Module):
         super(HM_Region_Loss, self).__init__()
         self.kpt_loss = loss_func[cfg["kpt_loss"]]
         # self.mask_loss = loss_func[cfg["mask_loss"]]
-        self.region_loss = loss_func[cfg["region_loss"]]
-        self.params = cfg["param"]
-        self.n_joints = cfg['n_joints']
-        self.n_out = len(self.params)
+        # self.region_loss = loss_func[cfg["region_loss"]]
 
-    def forward(self, hm_list, hm_gts, hm_weight=None):
+    def forward(self, hm_list, hm_gt, hm_weight=None):
         total_loss = 0
-        # print(f"{len(self.params)=}")
-        # print(f"{len(hm_list)=}")
-        # print(f"{len(hm_gts)=}")
-        for i in range(self.n_out):
-            if self.params[i] != 0:
-                total_loss = total_loss + \
-                        self.params[i] * self.kpt_loss(hm_list[i], hm_gts[i], hm_weight)
 
-        return total_loss
+        for hm in hm_list:
+            total_loss = total_loss + self.kpt_loss(hm, hm_gt, hm_weight)
+        loss_dict = dict(hm=total_loss.item())
+
+        return total_loss, loss_dict
 
 if __name__ == '__main__':
     from models.RKNet import HandNetSoftmax

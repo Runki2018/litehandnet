@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 # import pylab as pl
 from skimage import exposure
+from data.handset.dataset_function import get_bbox
 from utils.visualization_tools import draw_point
 
 # https://zhuanlan.zhihu.com/p/133707658
@@ -71,18 +72,12 @@ def homography(img, keypoints, prob=0.5):
     dst = pts_src_3.dot(h_rotate.T)
 
     h, status = cv2.findHomography(src, dst)  # h is the transformation matrix
-    img_out = cv2.warpPerspective(img, h, (img.shape[1], img.shape[0]), borderValue=(128, 128, 128))
+    # TODO: 这个填充颜色为了和卷积时的padding保持一致，所以从（128，128，128）改成（0，0，0）
+    img_out = cv2.warpPerspective(img, h, (img.shape[1], img.shape[0]), borderValue=(0,0,0))
 
     # recount the keypoints:
     keypoints_out = keypoints.dot(h.T)
 
-    # new = np.array(h).dot(np.array([400, 500, 1]))
-    # x, y, z = new
-    # cv2.circle(img, (400, 500), 3, (255, 255, 0), 4)
-    # cv2.circle(img_out, (int(x), int(y)), 3, (255, 0, 0), 4)
-    # pl.figure(), pl.imshow(img[:, :, ::-1]), pl.title("img")
-    # pl.figure(), pl.imshow(img_out[:, :, ::-1]), pl.title("out")
-    # pl.show()
     return img_out, keypoints_out
 
 
@@ -130,7 +125,48 @@ def central_scale(img, keypoints, resolution=(256, 256), prob=0.5):
 
     return img_crop, keypoints_out
 
+def central_crop(img, bbox, keypoints, size=(256, 256), prob=0.5):
+    """
+        central crop the image and then scale to specific resolution
+    :param size: final resolution after this process， （w, h）
+    :param img: cv2 image, (h,w,c)
+    :param bbox: (np.array([[cx, cy, w, h]], dtype=np.int16))
+    :param keypoints: the coordinates of keypoints ->  (n_hand, 21,3)
+    :param prob: the probability of flip
+    """
+    is_crop = False
+    if np.random.rand() < prob:
+        return img, bbox, keypoints, is_crop
+    
+    is_crop = True
+    h_img, w_img, c_img = img.shape
+    num_object = bbox.shape[0]
+    img_crop_list = []
 
+    for i in range(num_object):
+        x, y, w, h = bbox[i]
+        x1, y1 = int(x - w/2), int(y - h/2)
+        x2, y2 = int(x + w/2), int(y + h/2)
+        w, h = x2 - x1, y2 - y1
+        
+        img_crop = img[y1:y2, x1:y1]
+        factor = min(size[0] / w, size[1] / h)
+        nw, nh = w * factor, h * factor
+        img_crop = cv2.resize(img_crop, (nw, nh), interpolation=cv2.INTER_LINEAR)
+        
+        # 裁剪图下的关键点坐标
+        keypoints[i] -= (x1, y1, 0)
+        keypoints[i] *= (factor, factor, 1)
+
+        # 将等长宽比放大后的图像填补为指定宽高的图像
+        img_crop = np.pad(img_crop, ((0, size[1] - nh), (0, size[0] - nw), (0, 0)), 'constant', constant_values=128)
+        img_crop_list.append(img_crop)
+    
+    img_crops = np.stack(img_crop_list, axis=0)
+    bbox_crop = get_bbox(keypoints, alpha=1.3)
+    return img_crops, bbox_crop, keypoints, is_crop
+     
+    
 if __name__ == '__main__':
     img_path = "../test/test_example/1.jpg"
     image = cv2.imread(img_path)
