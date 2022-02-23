@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 from utils.training_kits import load_pretrained_state
+from models.hourglass_SA import ME_att
 from config.config import config_dict as cfg
 
 
@@ -11,8 +12,6 @@ class Merge(nn.Module):
 
     def forward(self, x):
         return self.conv(x)
-
-
 
 class Conv(nn.Module):
     def __init__(self, inp_dim, out_dim, kernel_size=3, stride=1, bn=False, relu=True):
@@ -84,51 +83,6 @@ class BRC(nn.Module):
         x = self.relu(x)
         x = self.conv(x)
         return x
-
-class Residual_SA(nn.Module):
-    """
-    https://blog.csdn.net/KevinZ5111/article/details/104730835?utm_medium=distribute.pc_aggpage_search_result.none-task-blog-2~aggregatepage~first_rank_ecpm_v1~rank_v31_ecpm-4-104730835.pc_agg_new_rank&utm_term=block%E6%94%B9%E8%BF%9B+residual&spm=1000.2123.3001.4430
-    """
-    def __init__(self, in_c, out_c):
-        super(Residual_SA, self).__init__()
-        self.global_pool = nn.Sequential(  # 这里看后面能不能改成全局 SoftPool
-            nn.Dropout2d(p=0.3),
-            nn.AdaptiveAvgPool2d(1))
-
-        self.fc = nn.Sequential(
-            nn.LayerNorm(in_c),
-            nn.ELU(inplace=True),
-            nn.Linear(in_c, in_c // 2),
-            nn.BatchNorm1d(in_c // 2),
-            nn.Linear(in_c // 2, in_c),   
-            nn.Sigmoid())
-
-        mid_c = in_c // 2
-        self.conv1 = BRC(in_c, mid_c, 1, 1, 0)
-
-        self.mid1_conv = nn.ModuleList([
-            BRC(mid_c, mid_c // 2, 3, 1, 1)  for _ in range(2) ])
-        
-        self.mid2_conv = nn.ModuleList([  # MSRB中是5x5，这里用空洞卷积来扩大感受野，可减少参数量
-            BRC(mid_c, mid_c // 2, 3, 1, 2, dilation=2)  for _ in range(2) for _ in range(2)  ])
-        
-        self.conv2 = BRC(mid_c, in_c, 1, 1, 0, bias=False)
-        self.conv3 = BRC(in_c, out_c, 1, 1, 0, bias=False)
-
-    def forward(self, x):
-        # (batch, channel, 1, 1) -> (batch, channel)
-        b, c, _, _ = x.shape
-        factors = self.global_pool(x).view(b, c)
-        factors = self.fc(factors).view(b, c, 1, 1)
-
-        m = self.conv1(x)
-        for i in range(2):
-            m1 = self.mid1_conv[i](m)
-            m2 = self.mid2_conv[i](m)
-            m = torch.cat([m1, m2], dim=1)
-        features = self.conv2(m) * factors
-        out = self.conv3(features)
-        return out
 
 class Hourglass(nn.Module):
     def __init__(self, n, f, increase=0, basic_block=Residual):

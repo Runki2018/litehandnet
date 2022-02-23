@@ -113,11 +113,13 @@ class ResultParser:
                     x2, y2  = min(int(x2), w), min(int(y2), h)
                     # print(f"{x1=}\t{x2=}\t{y1=}\t{y2=}")
                     
-                    mask_x = torch.zeros((n_joints, w), dtype=torch.bool).to(x_vectors.device)
-                    mask_x[:, x1: x2] = True
+                    # mask_x = torch.zeros((n_joints, w), dtype=torch.bool).to(x_vectors.device)
+                    # mask_x[:, x1: x2] = True
                     
-                    mask_y = torch.zeros((n_joints, h), dtype=torch.bool).to(x_vectors.device)
-                    mask_y[:, y1: y2] = True                    
+                    # mask_y = torch.zeros((n_joints, h), dtype=torch.bool).to(x_vectors.device)
+                    # mask_y[:, y1: y2] = True        
+                    mask_x = torch.ones((n_joints, w), dtype=torch.bool).to(x_vectors.device)         
+                    mask_y = torch.ones((n_joints, h), dtype=torch.bool).to(x_vectors.device)         
                     
                     # todo: 取bbox范围内峰值点
                     score_x, x = torch.topk(x_vectors[i] * mask_x, k=1)  # (n_joints, k)

@@ -1,7 +1,7 @@
 import torch
 import time
 from torch import nn
-from models.layers import Conv, Residual, Hourglass, BasicBlock, ConvBnReLu, SPP_layer
+from models.layers import Conv, Residual, Hourglass, BasicBlock, ConvBNReLu, SPP_layer
 from models.hourglass import HourglassNet, Residual, Residual_SA
 from models.attention import StageChannelAttention_fc, StageChannelAttention_all
 from models.region_layer import SizeBlock, RegionBlock

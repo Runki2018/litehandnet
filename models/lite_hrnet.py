@@ -305,7 +305,7 @@ class LiteHRNet(nn.Module):
         num_blocks = stages_spec['num_blocks'][stage_index]
         reduce_ratio = stages_spec['reduce_ratios'][stage_index]
         with_fuse = stages_spec['with_fuse'][stage_index]
-
+        
         modules = []
         for i in range(num_modules):
             # multi_scale_output is only used last module

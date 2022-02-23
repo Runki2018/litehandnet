@@ -1,11 +1,12 @@
 from torch import nn
 import torch
-from models.attention import SELayer, SoftPooling
+from models import attention
+from models.attention import NAM_Channel_Att, SELayer, SoftPooling
 
 
-class ConvBnReLu(nn.Module):
+class ConvBNReLu(nn.Module):
     def __init__(self, c_in, c_out, k=3, s=1, p=1, bias=False):
-        super(ConvBnReLu, self).__init__()
+        super(ConvBNReLu, self).__init__()
         self.cbr = nn.Sequential(
             nn.Conv2d(c_in, c_out, kernel_size=(k, k), stride=(s, s), padding=(p, p), bias=bias),
             nn.BatchNorm2d(c_out, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
@@ -369,7 +370,7 @@ class Hourglass_Bulat(nn.Module):
 
 class DWConv(nn.Module):
     """DepthwiseSeparableConvModul 深度可分离卷积"""
-    def __init__(self, in_channel, out_channel, stride=1, mid_relu=True, last_relu=True, bias=False, dilation=1, padding=1):
+    def __init__(self, in_channel, out_channel, stride=1, padding=1, dilation=1,mid_relu=True, last_relu=True, bias=False):
         super().__init__()
         self.depthwise_conv = nn.Sequential(
             nn.Conv2d(in_channel, in_channel, 3, stride, padding, groups=in_channel, bias=bias, dilation=dilation),
@@ -384,7 +385,6 @@ class DWConv(nn.Module):
         out = self.mid_relu(self.depthwise_conv(x)) 
         out = self.last_relu(self.pointwise_conv(out)) 
         return out
-
 
 def channel_shuffle(x, groups):
     """Channel Shuffle operation.
@@ -412,22 +412,292 @@ def channel_shuffle(x, groups):
 
     return x
 
-class DWConvBlock(nn.Module):
+class SplitDWConv(nn.Module):
     """这个是LiteHrnet中基础模块的简化版"""
-    def __init__(self, in_c, out_c, stride=1, mid_relu=True, last_relu=True, bias=False):
+    def __init__(self, in_c, out_c):
         super().__init__()
-        self.conv1x1 = ConvBnReLu(in_c, out_c, 1, 1, 0)
-        self.depth_separate_conv = DWConv(out_c // 2, out_c //2, stride, mid_relu, last_relu, bias)
+        if in_c == out_c:
+            self.conv1x1 = nn.Identity()
+        else:       
+            self.conv1x1 = ConvBNReLu(in_c, out_c, 1, 1, 0)
+        self.att1 = channel_attention3x3(out_c)
+        self.depth_separate_conv = DWConv(out_c // 2, out_c // 2)
+        self.att2 = channel_attention3x3(out_c // 2)
     
     def forward(self, x):
         x = self.conv1x1(x)
+        x = self.att1(x)
         x1, x2 = x.chunk(2, dim=1) 
         x2 = self.depth_separate_conv(x2)
+        x2 = self.att2(x2)
         x = torch.cat([x1, x2], dim=1)
         out = channel_shuffle(x, 2)
         return out
     
+class GhostConv(nn.Module):
+    def __init__(self, in_c, out_c):
+        super().__init__()
+        mid_c = out_c // 2
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(in_c, mid_c, 3, 1, 1),
+            nn.BatchNorm2d(mid_c),
+        )
+        self.conv1x1_group = nn.Sequential(
+            nn.Conv2d(mid_c, mid_c, 1, 1, 0, groups=mid_c),
+            nn.BatchNorm2d(mid_c),
+        )
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        x1 = self.conv1(x)
+        x2 = self.conv1x1_group(x1)
+        out = torch.cat([x1, x2], dim=1)
+        out= self.relu(out)
+        return out
+
+# ----------- 轻量化基础模块 ------------
+# class LiteHG(nn.Module):
+#     def __init__(self, n, f, increase=0, dilation=1, padding=1):
+#         super().__init__()
+#         nf = f + increase
+#         self.up1 = InvertedResidual(f, f, dilation=dilation, padding=padding)
+#         # Lower branch
+#         self.pool1 = nn.MaxPool2d(2, 2)
+#         self.low1 = InvertedResidual(f, nf, dilation=dilation, padding=padding)
+#         # Recursive hourglass
+#         if n > 1:
+#             self.low2 = LiteHG(n - 1, nf, increase, dilation, padding)
+#         else:
+#             self.low2 = InvertedResidual(nf, nf, dilation=dilation, padding=padding)
+#         self.low3 = InvertedResidual(nf, f, dilation=dilation, padding=dilation)
+#         self.up2 = nn.Upsample(scale_factor=2, mode='nearest')
+
+#     def forward(self, x):
+#         up1 = self.up1(x)
+#         pool1 = self.pool1(x)
+#         low1 = self.low1(pool1)
+
+#         low2 = self.low2(low1)
+
+#         low3 = self.low3(low2)
+#         up2 = self.up2(low3)
+#         return up1 + up2
+
+class LiteHG(nn.Module):
+    def __init__(self, n, f):
+        super().__init__()
+        self.up1 = ms_att(f)
+        # Lower branch
+        self.pool1 = nn.MaxPool2d(2, 2)
+        self.low1 = ms_att(f)
+        # Recursive hourglass
+        if n > 1:
+            self.low2 = LiteHG(n - 1, f)
+        else:
+            # self.low2 = InvertedResidual(nf, nf, dilation=dilation, padding=padding)
+            self.low2 = ms_att(f)
+        self.low3 = ms_att(f)
+        self.up2 = nn.Upsample(scale_factor=2, mode='nearest')
+        self.fuse_block = fuse_block(f * 2)
+
+    def forward(self, x):
+        up1 = self.up1(x)
+        pool1 = self.pool1(x)
+        low1 = self.low1(pool1)
+
+        low2 = self.low2(low1)
+
+        low3 = self.low3(low2)
+        up2 = self.up2(low3)
+        
+        out = self.fuse_block([up1, up2])
+        return out
+
+class ms_att(nn.Module):
+    """
+    https://blog.csdn.net/KevinZ5111/article/details/104730835?utm_medium=distribute.pc_aggpage_search_result.none-task-blog-2~aggregatepage~first_rank_ecpm_v1~rank_v31_ecpm-4-104730835.pc_agg_new_rank&utm_term=block%E6%94%B9%E8%BF%9B+residual&spm=1000.2123.3001.4430
+    """
+    def __init__(self, channels):
+        super().__init__()
+
+        self.mid1_conv = nn.ModuleList([nn.Sequential(
+                DWConv(channels, channels,mid_relu=False, last_relu=False),
+                DWConv(channels, channels,mid_relu=False), 
+                ) for _ in range(2)
+            ])
+        
+        self.mid2_conv = nn.ModuleList([nn.Sequential( 
+                DWConv(channels, channels, padding=2, dilation=2, mid_relu=False, last_relu=False),
+                DWConv(channels, channels, padding=2, dilation=2, mid_relu=False),
+                ) for _ in range(2)
+            ])
+        
+        self.fuse_block = nn.ModuleList([
+            fuse_block(channels * 2) for _ in range(2)
+        ])
+ 
+    def forward(self, x):
+        residual = x
+        for i in range(2):
+            b1 = self.mid1_conv[i](x)
+            b2 = self.mid2_conv[i](x)
+            x = self.fuse_block[i]([b1, b2])
+
+        out = x + residual
+        return out
+
+class fuse_block(nn.Module):
+    def __init__(self, channel=128):
+        super().__init__()
+        self.att = self.att = nn.Sequential(
+                    nn.AdaptiveAvgPool2d((3,3)),
+                    nn.BatchNorm2d(channel),
+                    nn.ReLU(inplace=True),
+                    nn.Conv2d(channel, channel, 3, 1, 0, groups=channel),      
+                    nn.Dropout(p=0.3),
+                    nn.Flatten(),
+                    nn.Linear(channel, channel),
+                    nn.Sigmoid(),  
+                    )
+
+    def forward(self, x):
+        # x(list): [x1, x2]
+        att = self.att(torch.cat(x, dim=1))
+        att = att.chunk(2, dim=1)
+        
+        b, c, _, _ = x[0].shape
+        x = [f * a.view(b, c, 1, 1) for f, a in zip(x, att)]
+        return sum(x)
+
+
+class channel_attention3x3(nn.Module):
+    def __init__(self, channel=128):
+        super().__init__()
+        self.att = nn.Sequential(
+                    nn.AdaptiveAvgPool2d((3,3)),
+                    nn.BatchNorm2d(channel),
+                    nn.ReLU(inplace=True),
+                    nn.Conv2d(channel, channel, 3, 1, 0, groups=channel),      
+                    nn.Dropout(p=0.3),
+                    nn.Flatten(),
+                    nn.Linear(channel, channel),
+                    nn.Sigmoid(),  
+                    )
+
+    def forward(self, x):
+        att = self.att(x)
+        b, c, _, _ = x.shape
+        x = x * att.view(b, c, 1, 1)
+        return x
     
+
+class InvertedResidual(nn.Module):
+
+    def __init__(self, in_features, out_features, expand_ratio=2,stride=1,
+                 dilation=1, padding=1, activation=nn.ReLU6) :
+        super(InvertedResidual, self).__init__()
+        self.stride = stride
+        assert stride in [1, 2]
+        hidden_dim = in_features * expand_ratio
+        self.is_residual = self.stride == 1 and in_features == out_features
+
+        self.conv = nn.Sequential(
+                    # pw Point-wise 
+                    nn.Conv2d(in_features, hidden_dim, 1, 1, 0, bias=False),
+                    nn.BatchNorm2d(hidden_dim),
+                    activation(inplace=True),
+                    # dw  Depth-wise
+                    nn.Conv2d(hidden_dim, hidden_dim, 3, stride, padding, dilation=dilation, groups=hidden_dim,
+                              bias=False),
+                    nn.BatchNorm2d(hidden_dim),
+                    activation(inplace=True),
+                    # pw-linear, Point-wise linear
+                    nn.Conv2d(hidden_dim, out_features, 1, 1, 0, bias=False),
+                    nn.BatchNorm2d(out_features),
+                )
+
+    def forward(self, x):
+        if self.is_residual:
+            return x + self.conv(x)
+        else:
+            return self.conv(x)
+
+class LiteResidual(nn.Module):
+
+    def __init__(self, in_features, out_features,stride=1,
+                 dilation=1, padding=1, activation=nn.ReLU6) :
+        super(LiteResidual, self).__init__()
+        self.stride = stride
+        assert stride in [1, 2]
+        hidden_dim = out_features // 2
+        self.conv = nn.Sequential(
+                    # pw Point-wise 
+                    nn.Conv2d(in_features, hidden_dim, 1, 1, 0, bias=False),
+                    nn.BatchNorm2d(hidden_dim),
+                    activation(inplace=True),
+                    # dw  Depth-wise
+                    nn.Conv2d(hidden_dim, hidden_dim, 3, stride, padding, dilation=dilation, groups=hidden_dim,
+                              bias=False),
+                    nn.BatchNorm2d(hidden_dim),
+                    activation(inplace=True),
+                    # pw-linear, Point-wise linear
+                    nn.Conv2d(hidden_dim, out_features, 1, 1, 0, bias=False),
+                    nn.BatchNorm2d(out_features),
+                )
+        
+        if stride == 1 and in_features == out_features:
+            self.skip_conv = nn.Identity()
+        else:
+            self.skip_conv = DWConv(in_features, out_features, stride, mid_relu=False, last_relu=False)
+
+    def forward(self, x):
+        residual = self.skip_conv(x)
+        out = self.conv(x) + residual
+        return out
+
+class LiteBRC(nn.Module):
+
+    def __init__(self, in_features, out_features, groups=2, activation=nn.ReLU6) :
+        super(LiteBRC, self).__init__()
+        assert in_features % groups == 0 and out_features % groups == 0
+        hidden_dim = min(in_features, out_features)
+        self.conv1 = nn.Sequential(
+                            nn.Conv2d(in_features, hidden_dim, 1, 1, 0,
+                                    bias=False, groups=groups),
+                            nn.BatchNorm2d(hidden_dim),
+                            )
+        self.conv2 = nn.Sequential(
+                        nn.Conv2d(hidden_dim , out_features, 1, 1, 0,
+                        bias=False, groups=groups),
+                        nn.BatchNorm2d(out_features),
+                        activation(inplace=True),)
+                
+        
+    def forward(self, x):
+        out = self.conv1(x)
+        out = channel_shuffle(out, 2)
+        out = self.conv2(out)
+        return out
+
+class ReducedConv1x1(nn.Module):
+
+    def __init__(self, in_features, out_features, groups=2, activation=nn.ReLU6) :
+        super().__init__()
+        assert in_features % groups == 0 and out_features % groups == 0
+        hidden_dim = min(in_features, out_features)
+        self.conv_gloab = nn.Sequential(
+                            nn.MaxPool2d(2, 2),
+                            nn.Conv2d(in_features, out_features, 1, 1, 0,
+                                    bias=False, groups=groups),
+                            nn.BatchNorm2d(hidden_dim),
+                            nn.Upsample(scale_factor=2)
+                            )
+        self.att = channel_attention3x3(out_features)
+
+                
+    def forward(self, x):
+        out1 = self.conv_gloab(x)
+        out2 = self.conv_groups(x)
+        return out1 + out2
     
-    
-    
+

@@ -17,40 +17,58 @@ loss_func = {
     'JointsLoss': JointsMSELoss(),
 }
 
-class Center_SimDR_Loss(nn.Module):
+class HMSimDRLoss(nn.Module):
     """
     MTL多任务学习，自动权重调节: https://zhuanlan.zhihu.com/p/367881339
     
     """
     def __init__(self, num_loss=4, auto_weights=False):
         super().__init__()
-        self.kpts_loss = KLDiscretLoss()
+        self.hm_loss = loss_func[cfg["kpt_loss"]]
+        self.vector_loss = KLDiscretLoss()
         params = torch.ones(num_loss, requires_grad=True)
         if auto_weights:
             self.p = nn.Parameter(params)   # TODO:将这个参数也放入优化器的参数优化列表中
         self.auto_weights = auto_weights
     
-    def forward(self, centermap, target_centermap, mask,
-                output_x, output_y, target_x, target_y, target_weight):
+    def forward(self, hm, hm_gt,
+                output_x, output_y,
+                target_x, target_y, target_weight):
         
-        center_loss = focal_loss(centermap[:, 0:1], target_centermap[:, 0:1])
-        wh_loss = reg_l1_loss(centermap[:, 1:3], target_centermap[:, 1:3], mask)
-        offset_loss = reg_l1_loss(centermap[:, 3:], target_centermap[:, 3:], mask)
+        hm_loss = 0
+        for hm_i in hm:
+            hm_loss += self.hm_loss(hm_i, hm_gt)
+        vector_loss = self.vector_loss(output_x, output_y, target_x, target_y, target_weight)
         
-        kpts_loss = self.kpts_loss(output_x, output_y, target_x, target_y, target_weight)
-        
-        # TODO: 这个损失函数的比例怎么调节？ 用这个正则化，会不会直接学成 p = 0，使得Loss=0？
-        loss_list = [center_loss, wh_loss, offset_loss, kpts_loss]
         loss_sum = 0
+        loss_dict = dict(hm=hm_loss, vector=vector_loss)
         if self.auto_weights:
-            for i, loss in enumerate(loss_list):
+            for i, loss in enumerate(loss_dict.values()):
                 c2 = self.p[i] ** 2  # 正则项平方非负，后面再用log(1+c2)，使c2接近0
                 loss_sum += 0.5 / c2 * loss + torch.log(1 + c2)
         else:
-            loss_sum = sum(loss_list)
+            loss_sum = sum([l for l in loss_dict.values()])
         
-        loss_list = [l.item() for l in loss_list]
-        return loss_sum, loss_list
+        loss_dict = {k:v.item() for k, v in loss_dict.items()}
+        return loss_sum, loss_dict
+
+class SimDRLoss(nn.Module):
+    """
+    MTL多任务学习，自动权重调节: https://zhuanlan.zhihu.com/p/367881339
+    
+    """
+    def __init__(self):
+        super().__init__()
+        self.vector_loss = KLDiscretLoss()
+
+    def forward(self,
+                output_x, output_y,
+                target_x, target_y, target_weight):
+        vector_loss = self.vector_loss(output_x, output_y, target_x, target_y, target_weight)
+        loss_dict = dict(vector=vector_loss)
+        loss_dict = {k:v.item() for k, v in loss_dict.items()}
+        return vector_loss, loss_dict
+
 
 class HMLoss(nn.Module):
     """

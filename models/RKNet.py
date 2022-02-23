@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from models.layers import Conv, Residual, Hourglass, BasicBlock, ConvBnReLu
+from models.layers import Conv, Residual, Hourglass, BasicBlock, ConvBNReLu
 from config.config import config_dict as cfg
 
 
@@ -21,8 +21,8 @@ class RegionKeypointNetwork(nn.Module):
         self.num_hourglass = cfg["num_hourglass"]  # default 2
 
         self.stem = nn.Sequential(  # todo: 这里通道数 64 ， channel_mid的最佳值要实验确定
-            ConvBnReLu(3, main_channels // 2, 3, 2, 1),
-            ConvBnReLu(main_channels // 2, main_channels, 3, 2, 1),
+            ConvBNReLu(3, main_channels // 2, 3, 2, 1),
+            ConvBNReLu(main_channels // 2, main_channels, 3, 2, 1),
         )  # stem网络层，提取初级特征， 输出是 (batch, main_channels, height/4, width/4)
 
         # 两个沙漏模块，初步预测关键点

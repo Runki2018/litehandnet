@@ -9,7 +9,7 @@ from utils.CenterSimDRParser import ResultParser
 
 from models.center_simDR import LiteHourglassNet as Network
 
-from loss.loss import Center_SimDR_Loss as Loss
+from loss.loss import SimDRLoss as Loss
 from train.distributed_utils import init_distributed_mode, dist, cleanup, reduce_value, reduce_value
 from utils.training_kits import stdout_to_tqdm, load_pretrained_state
 from config.config import config_dict as cfg

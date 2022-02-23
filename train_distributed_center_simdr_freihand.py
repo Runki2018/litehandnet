@@ -1,4 +1,3 @@
-from re import S
 import torch
 import argparse
 import torch.optim as optim
@@ -10,8 +9,11 @@ from utils.evaluation import evaluate_pck, evaluate_ap
 
 # from models.center_simDR import LiteHourglassNet as Network
 from models.hourglass_SA import HourglassNet_SA as Network
+# from models.LiteHourglass import LiteHourglass as Network
 
-from loss.loss import HMLoss as Loss
+
+from loss.loss import HMSimDRLoss as Loss
+
 from train.distributed_utils import init_distributed_mode, dist, cleanup, reduce_value, reduce_value
 from utils.training_kits import stdout_to_tqdm, load_pretrained_state
 from config.config import config_dict as cfg
@@ -110,8 +112,8 @@ class Main:
         #                                                       min_lr=cfg["lr"] * 0.001, cooldown=10)
 
         # 自定义的逐周期递减正弦学习率曲线
-        T, lr_gamma, min_lr = cfg['T'], cfg['lr_gamma'], cfg['min_lr'] / args.lr
-        lambda1 = lambda epoch: np.cos((epoch % (T + (epoch / T)) / (T + (epoch / T))) * np.pi / 2) * (lr_gamma ** (epoch / T)) + min_lr
+        T, lr_gamma = cfg['T'], cfg['lr_gamma']
+        lambda1 = lambda epoch: np.cos((epoch % (T + (epoch / T)) / (T + (epoch / T))) * np.pi / 2) * (lr_gamma ** (epoch / T))
         self.scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lambda1)
 
         # load checkpoint
@@ -133,8 +135,8 @@ class Main:
             if not cfg["just_model"] and is_match:
                 self.optimizer.load_state_dict(self.save_dict["optimizer"])
                 self.start_epoch = self.save_dict["epoch"]
-                self.best_loss = min(self.save_dict["loss"])
-                self.best_mPCK = max(self.save_dict["mPCK"])
+                # self.best_loss = min(self.save_dict["loss"])
+                # self.best_mPCK = max(self.save_dict["mPCK"])
         else:
             checkpoint_path = self.save_root + "initial_weights.pt"
             # 如果不存在预训练权重，需要将第一个进程中的权重保存，然后其他进程载入，保持初始化权重一致
@@ -174,8 +176,8 @@ class Main:
         # 转为DDP模型, 这步放在最后，注意在DDP之前模型要先model.to(device)到相应设备
         self.model = torch.nn.parallel.DistributedDataParallel(self.model,
                                                          device_ids=[args.gpu],
-                                                         output_device=args.gpu
-                                                         ,find_unused_parameters=True)
+                                                         output_device=args.gpu)
+                                                        #  ,find_unused_parameters=True)
         print("Model is ready!")
         
         for state in self.optimizer.state.values():
@@ -195,8 +197,10 @@ class Main:
             meta = [gt.to(self.device) for gt in meta]
             img, target_x, target_y, target_weight, kpts_hm, bbox, gt_kpts = meta
             hm, pred_x, pred_y = self.model(img)
-            loss, loss_lost = self.criterion(hm, kpts_hm, 
+            loss, loss_dict = self.criterion(hm, kpts_hm, 
                                  pred_x, pred_y, target_x, target_y, target_weight)
+            # loss, loss_dict = self.criterion(pred_x, pred_y,
+                                            #  target_x, target_y, target_weight)
 
             loss.backward()
             # loss = reduce_value(loss, average=True)
@@ -204,15 +208,14 @@ class Main:
             self.optimizer.zero_grad()
 
         with torch.no_grad():
-            names = ['region_loss', 'kpt_loss',  'vector_loss']
-            for name, loss_value in zip(names, loss_lost):
-                print(f"{name}: {loss_value}")
             lr = self.optimizer.param_groups[0]['lr']
             if lr > 5e-7:
                     # self.scheduler.step(metrics=100 - self.best_mPCK)
                     self.scheduler.step()
 
             if self.rank == 0:
+                for name, loss_value in loss_dict.items():
+                    print(f"{name}: {loss_value}")
                 loss = loss.item()
                 print(exp_id, f"{loss=}")       
                 print(f"{lr=}")
@@ -221,10 +224,10 @@ class Main:
                 self.save_dict["lr"].append(lr)
                 self.save_dict["loss"].append(loss)
 
-                best_loss = min(self.save_dict["loss"])
+                # best_loss = min(self.save_dict["loss"])
 
-                self.writer.add_scalar("loss", loss, self.epoch)
-                self.writer.add_scalar("lr", lr, self.epoch)
+                # self.writer.add_scalar("loss", loss, self.epoch)
+                # self.writer.add_scalar("lr", lr, self.epoch)
             
         # 等待所有进程计算完毕
         if self.device != torch.device("cpu"):
@@ -243,9 +246,9 @@ class Main:
                 # parse_ap = []
                 for meta in tqdm(self.test_loader, desc="testing "):
                     meta = [gt.to(self.device) for gt in meta]
-                    img, target_x, target_y, target_weight, kpts_hm, bbox, gt_kpts = meta = meta
-                    # hm, pred_x, pred_y = self.model(img)
-                    hm, pred_x, pred_y = self.model(img), target_x, target_y
+                    img, target_x, target_y, target_weight, kpts_hm, bbox, gt_kpts = meta
+                    hm, pred_x, pred_y = self.model(img)
+                    # hm, pred_x, pred_y = [kpts_hm], target_x, target_y  # 检查评价指标是否正确
                     
                     # 结果解析，得到原图关键点和边界框
                     vector2kpt, vb2kpt, hm2kpt, pred_bboxes = self.result_parser.parse(hm[-1], pred_x, pred_y, bbox)
@@ -258,11 +261,11 @@ class Main:
                     ap_list.append(ap* img.shape[0])
                     
                     avg_xy_pck = self.result_parser.evaluate_pck(vector2kpt, gt_kpts, thr=cfg['pck_thr'])
-                    avg_xy_b_pck = self.result_parser.evaluate_pck(vb2kpt, gt_kpts, thr=cfg['pck_thr'])
+                    # avg_xy_b_pck = self.result_parser.evaluate_pck(vb2kpt, gt_kpts, thr=cfg['pck_thr'])
                     # avg_hm_pck = self.result_parser.evaluate_pck(hm2kpt, gt_kpts, thr=0.2)
 
                     xy_pck.append(avg_xy_pck * img.shape[0]) 
-                    xy_b_pck.append(avg_xy_b_pck * img.shape[0]) 
+                    # xy_b_pck.append(avg_xy_b_pck * img.shape[0]) 
                     
                     for i in range(self.n_out):
                         avg_hm_pck = evaluate_pck(hm[i][:, 3:], kpts_hm[:, 3:], bbox, target_weight, thr=cfg['pck_thr']).item()       
@@ -292,7 +295,7 @@ class Main:
                     for i in range(-1, -4, -1):
                         print("pck{} = {:.3f}".format(i, self.save_dict["mPCK"][i]), end="\t")
                 else:
-                    print("pck_vector = {:.3f}".format(PCK_hm[-1]))
+                    print("pck_hm = {:.3f}".format(PCK_hm[-1]))
 
                 if PCK_hm[-1] > self.best_mPCK:
                     self.best_mPCK = PCK_hm[-1]
@@ -311,22 +314,27 @@ class Main:
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
+        save_flag = False
         if best_loss:
             file_name = "/{0}_loss_{1}epoch.pt".format(round(self.best_loss, 3), self.epoch)
+            save_flag = True
         elif best_pck:
             file_name = "/{0}_PCK_{1}epoch.pt".format(round(self.best_mPCK, 3), self.epoch)
+            save_flag = False if self.best_mPCK < 92 else True       
         elif best_ap:
             file_name = "/{0}_AP_{1}epoch.pt".format(round(self.best_ap, 3), self.epoch)
+            save_flag = False if self.best_ap < 40 else True
         else:
             raise NotImplementedError
 
-        save_file = save_dir + file_name
-        print(f"{save_file=}")
+        if save_flag:
+            save_file = save_dir + file_name
+            print(f"{save_file=}")
 
-        self.save_dict["epoch"] = self.epoch
-        self.save_dict["state_dict"] = self.model.state_dict()
-        self.save_dict["optimizer"] = self.optimizer.state_dict()
-        torch.save(self.save_dict, save_file)
+            self.save_dict["epoch"] = self.epoch
+            self.save_dict["state_dict"] = self.model.state_dict()
+            self.save_dict["optimizer"] = self.optimizer.state_dict()
+            torch.save(self.save_dict, save_file)
 
     def run(self):
         try:

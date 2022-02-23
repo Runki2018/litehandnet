@@ -1,5 +1,5 @@
 HG_cfg = {
-    "experiment_id": "1HG-lite-cd-c128",
+    "experiment_id": "1HG-original-c128-h4-k2-o64",
     'dataset': 'freihand',
     # model structure:
     'n_joints': 21,  # keypoints + region map
@@ -16,19 +16,19 @@ HG_cfg = {
     'higher_output': False,
     'out_kernel': 1, # 1 or 3
     'main_channels': 128,
-    'simdr_split_ratio' : 1,
+    'simdr_split_ratio' : 2,
     'cycle_detection_reduction': 2,  # 循环检测分辨率下降因子
-    "nstack": 1,
+    "nstack": 1,  
     "param": (1, 1, 1),   # assert len(param) == nstack + higher_output
     'increase': 0,
-
+ 
     # data augmentation
-    'is_augment': True,
+    'is_augment': False,
     'bbox_alpha': 1.3, # 关键点边框放大倍率
-    'gamma_prob': 0.5,
-    'sigmoid_prob': 0.2,
-    'homography_prob': 0.5,
-    'flip_prob': 0.5,
+    'gamma_prob': 0.2,
+    'sigmoid_prob': 0.1,
+    'homography_prob': 0.3,
+    'flip_prob': 0.3,
     'use_different_joints_weight': False,
 
     # training setting
@@ -39,7 +39,7 @@ HG_cfg = {
     "mask_loss": "L2Loss",
     "region_loss": "SmoothL1Loss",
 
-    'batch_size': 64,
+    'batch_size': 48,
     "syncBN": True,         # 这个很关键,对最终性能有略微提升的效果
     'workers': 8,
 
@@ -53,6 +53,6 @@ HG_cfg = {
     "n_epochs": 500,
     "reload": True,
     "just_model": True,
-    "checkpoint": "checkpoint/final/1HG-lite-cd-c128/2022-02-15/88.088_PCK_72epoch.pt",
-    "save_root": "./checkpoint/final/"
+    "checkpoint": "checkpoint/Center_SimDR/1HG-ME-att-c128-k2/73.82_AP_0epoch.pt",
+    "save_root": "./checkpoint/final_all/ME-att/"
 }

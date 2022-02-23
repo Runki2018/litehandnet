@@ -417,7 +417,6 @@ class NAM_Channel_Att(nn.Module):
         
         return x
 
-
 if __name__ == '__main__':
     a = torch.randn(2, 3, 6, 6)
     b = torch.randn(2, 3, 6, 6)

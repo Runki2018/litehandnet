@@ -4,7 +4,7 @@ from torch import nn
 from utils.training_kits import load_pretrained_state
 from config.config import config_dict as cfg
 from models.attention import Flatten, SELayer, NAM_Channel_Att
-from models.layers import DWConv, DWConvBlock
+from models.layers import DWConv, SplitDWConv
 from einops import rearrange, repeat
 
 class BRC(nn.Module):
@@ -89,13 +89,13 @@ class Hourglass_module(nn.Module):
         self.decoder = nn.ModuleList([])
         # TODO： 简化skip 和 最小层度的卷积层 是否会精度下降？    
         for i in range(n):
-            self.skip_layer.append(DWConvBlock(channels[i], channels[i]))  
+            self.skip_layer.append(SplitDWConv(channels[i], channels[i]))  
             if i != n-1:
                 self.encoder.append(ME_att(channels[i], channels[i+1]))
                 self.decoder.append(ME_att(channels[i+1], channels[i]))        
             else:
-                self.encoder.append(DWConvBlock(channels[i], channels[i]))
-                self.decoder.append(DWConvBlock(channels[i], channels[i]))  
+                self.encoder.append(SplitDWConv(channels[i], channels[i]))
+                self.decoder.append(SplitDWConv(channels[i], channels[i]))  
 
         self.decoder = self.decoder[::-1]
         self.pool = nn.MaxPool2d(2, 2)
@@ -177,7 +177,7 @@ class LiteHourglassNet(nn.Module):
 
         self.features = nn.ModuleList([
             nn.Sequential(
-                DWConvBlock(inp_dim, inp_dim),
+                SplitDWConv(inp_dim, inp_dim),
                 BRC(inp_dim, inp_dim),
             ) for _ in range(nstack)])
         
