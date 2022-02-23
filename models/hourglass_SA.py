@@ -49,17 +49,19 @@ class Residual(nn.Module):
         self.conv2 = Conv(int(out_dim / 2), int(out_dim / 2), 3, relu=False)
         self.bn3 = nn.BatchNorm2d(int(out_dim / 2))
         self.conv3 = Conv(int(out_dim / 2), out_dim, 1, relu=False)
-        self.skip_layer = Conv(inp_dim, out_dim, 1, relu=False)
+        
         if inp_dim == out_dim:
-            self.need_skip = False
+            self.skip_layer = nn.Identity()
         else:
-            self.need_skip = True
+            self.skip_layer = Conv(inp_dim, out_dim, 1, relu=False)
 
     def forward(self, x):
-        if self.need_skip:
-            residual = self.skip_layer(x)
-        else:
-            residual = x
+        # if self.need_skip:
+        #     residual = self.skip_layer(x)
+        # else:
+        #     residual = x
+        residual = self.skip_layer(x)
+        
         out = self.bn1(x)
         out = self.relu(out)
         out = self.conv1(out)

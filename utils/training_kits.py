@@ -45,20 +45,20 @@ def load_pretrained_state(model_state, pretrained_state):
     i = 0
     for k2 in keys2:
         k2_s = k2.strip('module.')
-        ok = False
+        # ok = False
         for k1 in keys1:
             if k2_s in k1 and model_state[k1].shape == pretrained_state[k2].shape:
                 model_state[k1] = pretrained_state[k2]
                 ok = True
                 i +=1
-            elif k2_s in k1 and model_state[k1].shape != pretrained_state[k2].shape:
-                print(f"{k1=}\t{ model_state[k1].shape}")
-                print(f"{k2=}\t{ pretrained_state[k2].shape}")
-                print('-' * 30)
-                ok = True
+            # elif k2_s in k1 and model_state[k1].shape != pretrained_state[k2].shape:
+            #     print(f"{k1=}\t{ model_state[k1].shape}")
+            #     print(f"{k2=}\t{ pretrained_state[k2].shape}")
+            #     print('-' * 30)
+            #     ok = True
         
-        if not ok:
-            print(f"{k2=}\t{ pretrained_state[k2].shape}")
+        # if not ok:
+        #     print(f"{k2=}\t{ pretrained_state[k2].shape}")
 
     if i != len(keys1):
         fully_match = False

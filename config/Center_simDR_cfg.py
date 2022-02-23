@@ -24,7 +24,7 @@ HG_cfg = {
  
     # data augmentation
     'is_augment': False,
-    'bbox_alpha': 1.5, # 关键点边框放大倍率
+    'bbox_alpha': 1.5, # 关键点边框放大倍率, 预测框偏大
     'gamma_prob': 0.2,
     'sigmoid_prob': 0.1,
     'homography_prob': 0.3,
@@ -53,6 +53,6 @@ HG_cfg = {
     "n_epochs": 500,
     "reload": True,
     "just_model": True,
-    "checkpoint": "checkpoint/Center_SimDR/1HG-ME-att-c128-k2/73.82_AP_0epoch.pt",
+    "checkpoint": "./checkpoint/final_all/ME-att/1HG-original-c128-h4-k2-o64/2022-02-23/74.663_AP_0epoch.pt",
     "save_root": "./checkpoint/final_all/ME-att/"
 }
