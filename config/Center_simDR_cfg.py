@@ -24,7 +24,7 @@ HG_cfg = {
  
     # data augmentation
     'is_augment': False,
-    'bbox_alpha': 1.3, # 关键点边框放大倍率
+    'bbox_alpha': 1.5, # 关键点边框放大倍率
     'gamma_prob': 0.2,
     'sigmoid_prob': 0.1,
     'homography_prob': 0.3,
