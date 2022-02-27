@@ -234,8 +234,8 @@ class Main:
 
                 # best_loss = min(self.save_dict["loss"])
 
-                # self.writer.add_scalar("loss", loss, self.epoch)
-                # self.writer.add_scalar("lr", lr, self.epoch)
+                self.writer.add_scalar("loss", loss, self.epoch)
+                self.writer.add_scalar("lr", lr, self.epoch)
             
         # 等待所有进程计算完毕
         if self.device != torch.device("cpu"):
@@ -290,10 +290,10 @@ class Main:
                 print(f"Coordinate PCK = {coor_pck / self.test_set.__len__() *100}")
 
                 # 记录训练数据
-                # self.save_dict["mPCK"].append(PCK_hm[-1])
-                # self.save_dict["ap"].append(ap_final)
+                self.save_dict["mPCK"].append(PCK_hm[-1])
+                self.save_dict["ap"].append(ap_final)
                 # self.writer.add_scalars('mPCK', {'pck_vector': PCK_vector, 'pck_hm': PCK_hm}, self.epoch)
-                # self.writer.add_scalars('AP', {"AP50": ap50_final, "AP": ap_final}, self.epoch)
+                self.writer.add_scalars('AP', {"AP50": ap50_final, "AP": ap_final}, self.epoch)
 
                 if len(self.save_dict["mPCK"]) > 3:
                     for i in range(-1, -4, -1):
@@ -350,7 +350,7 @@ class Main:
                 self.epoch = epoch
 
                 self.train_sampler.set_epoch(epoch)
-                # self.train()
+                self.train()
                 if (epoch % cfg['eval_interval']) == 0:
                     self.test()
             if self.rank == 0:

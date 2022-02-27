@@ -1,5 +1,5 @@
 HG_cfg = {
-    "experiment_id": "1HG-ME-att-rand_cd_ls-c128-h4-k2-o64",
+    "experiment_id": "1HG-ME-att-rand_cd-ls-c128-h4-k2-o64",
     'dataset': 'freihand',
     # model structure:
     'n_joints': 21,  # keypoints + region map
@@ -44,7 +44,7 @@ HG_cfg = {
     'workers': 8,
 
     "CUDA_VISIBLE_DEVICES": "0, 1, 2, 3",
-    'eval_interval': 1,
+    'eval_interval': 2,
     'pck_thr': 0.2, 
     'optim': 'AdamW',  # 'SGD', ' AdamW' or RMSprop
     "lr": 1e-3,  # 初始学习率，最小学习率约为 0.01 * lr
@@ -54,5 +54,5 @@ HG_cfg = {
     "reload": True,
     "just_model": True,
     "checkpoint": "checkpoint/final_all/ME-att/1HG-ME-att-rand_cd_ls-c128-h4-k2-o64/2022-02-26/99.942_AP_0epoch.pt",
-    "save_root": "./checkpoint/final/ME-att/"
+    "save_root": "./checkpoint/final_all/ME-att/ls/"
 }
