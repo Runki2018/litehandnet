@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torchvision
 from utils.bbox_metric import xywh2xyxy, box_iou, bbox_iou
-from config.config import parser_cfg, config_dict as cfg
+from config.config import pcfg, config_dict as cfg
 
 image_size = cfg["image_size"]
 heatmap_sigma = cfg["hm_sigma"][0]
@@ -233,10 +233,10 @@ def evaluate_ap(batch_region_maps, gt_boxes, k=200, conf_thr=0.3,
     :return: AP and a list of predicted bboxes, [lx, ly, w, h, conf]
     """
 
-    candidates = cs_from_region_map(batch_region_maps, k, parser_cfg['detection_threshold'])
+    candidates = cs_from_region_map(batch_region_maps, k, pcfg['detection_threshold'])
     # print(f"{candidates[:20]=}")
-    pred_bboxes = non_max_suppression(candidates, parser_cfg["iou_threshold"],
-                                      parser_cfg['detection_threshold'], parser_cfg["max_num_bbox"])
+    pred_bboxes = non_max_suppression(candidates, pcfg["iou_threshold"],
+                                      pcfg['detection_threshold'], pcfg["max_num_bbox"])
     # print(f"{pred_bboxes[0]=}")
 
     gt_boxes = gt_boxes.tolist() if isinstance(gt_boxes, torch.Tensor) else gt_boxes

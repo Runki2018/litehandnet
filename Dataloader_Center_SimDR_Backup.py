@@ -11,7 +11,7 @@ from utils.utils_centermap import *
 from utils.data_augmentation import adjust_gamma, adjust_sigmoid, homography, horizontal_flip
 
 from utils.training_kits import set_seeds
-from config.config import seed, parser_cfg, DATASET, config_dict as cfg
+from config.config import seed, pcfg, DATASET, config_dict as cfg
 
 # Prevent OpenCV from multithreading (to use PyTorch DataLoader)
 cv2.setNumThreads(0)
@@ -36,14 +36,14 @@ class CS_HandData(Dataset):
         self.ann_json = json.load(open(ann_file, 'r'))
         # TODO: 在小部分数据集上训练和测试[0:5000]
         if is_train:
-            self.img_list = self.ann_json["images"]
-            self.ann_list = self.ann_json["annotations"]
+            self.img_list = self.ann_json["images"][::20]
+            self.ann_list = self.ann_json["annotations"][::20]
         else:
-            self.img_list = self.ann_json["images"]
-            self.ann_list = self.ann_json["annotations"]
+            self.img_list = self.ann_json["images"][::20]
+            self.ann_list = self.ann_json["annotations"][::20]
         self.n_joints = cfg['n_joints']
         self.simdr_split_ratio = cfg['simdr_split_ratio']
-        self.max_num_object = parser_cfg["max_num_bbox"]  # 一张图片上最多保留的目标数
+        self.max_num_object = pcfg["max_num_bbox"]  # 一张图片上最多保留的目标数
         
         # mask_func = {1: get_mask1, 2: get_mask2, 3: get_mask3}
         # self.get_mask = mask_func[cfg["mask_type"]]  # 手部区域部分，要用背景热图，还是手部关键点掩膜
@@ -230,7 +230,6 @@ class CS_HandData(Dataset):
         bbox_list = torch.as_tensor(bbox_list)
         
         return img_crop, target_x, target_y, kpts_hm, bbox_list, gt_kpts
-        # return img_crop, kpts_hm, bbox_list, gt_kpts
         
         
     def generate_centermap(self, bbox):

@@ -31,6 +31,7 @@ zhhand = {
 freihand = {
     "name": "freihand",
     "root": r"/home/user/PycharmProjects/Dataset/freiHand/",
+    # "test_file": r"./split_testset/freihand/small.json",
     "test_file": r"/home/user/PycharmProjects/Dataset/freiHand/annotations/freihand_test.json",
     "train_file": r"/home/user/PycharmProjects/Dataset/freiHand/annotations/freihand_train.json",
     # "test_file": r"/home/user/PycharmProjects/Dataset/freiHand/annotations/freihand_train.json",
@@ -96,12 +97,12 @@ seed = 1
 DATASET = Dataset[config_dict["dataset"]]
 
 # used in HeatmapParser.py
-parser_cfg = {
+pcfg = {
     "num_candidates": 10,  # NMS前候选框个数，对应于取中心点热图前k个峰值点。
     "max_num_bbox": 1,    # 一张图片保留多少个预测框 == 最大预测目标数
-    "nms_kernel": 5,        # 抑制掉热图峰值点区域范围
+    "nms_kernel": 11,        # 抑制掉热图峰值点区域范围
     "nms_stride": 1,
-    "nms_padding": 2,
+    "nms_padding": 5,
     "detection_threshold": 0.1,  # 框中心点是目标的阈值
     "iou_threshold": 0.6,  # NMS去掉重叠框的IOU阈值
     "tag_threshold": 1.,
@@ -113,7 +114,10 @@ parser_cfg = {
     "region_avg_kernel": 3,
     "region_avg_stride": 1,
     
-    'blue_kernel': 11,  # 高斯模糊的核大小，DARK 默认为11
+    'blue_kernel': 19,  # 高斯模糊的核大小，DARK 默认为11
+    
+    'cd_iou': 0.3, # 循环检测阈值，边框IOU
+    'cd_ratio': 0.1, # 循环检测阈值, 手部区域占比
     
 }
 

@@ -31,10 +31,8 @@ def init_distributed_mode(args):
                             world_size=args.world_size, rank=args.rank)
     dist.barrier()  # 阻塞，等待所有GPU处理完上面一步
 
-
 def cleanup():
     dist.destroy_process_group()  # 训练完成后记得销毁进程组释放资源
-
 
 def is_dist_avail_and_initialized():
     """检查是否支持分布式环境"""

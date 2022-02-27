@@ -1,5 +1,5 @@
 HG_cfg = {
-    "experiment_id": "1HG-original-c128-h4-k2-o64",
+    "experiment_id": "1HG-ME-att-rand_cd_ls-c128-h4-k2-o64",
     'dataset': 'freihand',
     # model structure:
     'n_joints': 21,  # keypoints + region map
@@ -17,7 +17,7 @@ HG_cfg = {
     'out_kernel': 1, # 1 or 3
     'main_channels': 128,
     'simdr_split_ratio' : 2,
-    'cycle_detection_reduction': 2,  # 循环检测分辨率下降因子
+    'cycle_detection_reduction': 1,  # 循环检测分辨率下降因子
     "nstack": 1,  
     "param": (1, 1, 1),   # assert len(param) == nstack + higher_output
     'increase': 0,
@@ -50,9 +50,9 @@ HG_cfg = {
     "lr": 1e-3,  # 初始学习率，最小学习率约为 0.01 * lr
     'T': 50,  # 周期
     'lr_gamma': 0.8,  # 每周期学习率递减因子
-    "n_epochs": 500,
+    "n_epochs": 110,
     "reload": True,
     "just_model": True,
-    "checkpoint": "./checkpoint/final_all/ME-att/1HG-original-c128-h4-k2-o64/2022-02-23/74.663_AP_0epoch.pt",
-    "save_root": "./checkpoint/final_all/ME-att/"
+    "checkpoint": "checkpoint/final_all/ME-att/1HG-ME-att-rand_cd_ls-c128-h4-k2-o64/2022-02-26/99.942_AP_0epoch.pt",
+    "save_root": "./checkpoint/final/ME-att/"
 }

@@ -6,7 +6,7 @@ from utils.bbox_metric import xywh2xyxy, box_iou, bbox_iou
 from utils.evaluation import count_ap
 import torchvision
 
-from config.config import DATASET, parser_cfg, config_dict as cfg
+from config.config import DATASET, pcfg, config_dict as cfg
 
 
 class HeatmapParser_SH:
@@ -15,19 +15,19 @@ class HeatmapParser_SH:
     """
 
     def __init__(self):
-        kernel_size = parser_cfg["region_avg_kernel"]
+        kernel_size = pcfg["region_avg_kernel"]
         self.avg_pool = torch.nn.AvgPool2d(kernel_size,
-                                           parser_cfg["region_avg_stride"],
+                                           pcfg["region_avg_stride"],
                                            (kernel_size - 1) // 2)
 
-        self.max_pool = torch.nn.MaxPool2d(parser_cfg["nms_kernel"],
-                                           parser_cfg["nms_stride"],
-                                           parser_cfg["nms_padding"])
+        self.max_pool = torch.nn.MaxPool2d(pcfg["nms_kernel"],
+                                           pcfg["nms_stride"],
+                                           pcfg["nms_padding"])
 
-        self.num_candidates = parser_cfg["num_candidates"]  # NMS前候选框个数=取中心点热图峰值的个数
-        self.max_num_bbox = parser_cfg["max_num_bbox"]  # 一张图片上最多保留的目标数
-        self.detection_threshold = parser_cfg["detection_threshold"]  # 候选框检测到目标的阈值
-        self.iou_threshold = parser_cfg["iou_threshold"]  # NMS去掉重叠框的IOU阈值
+        self.num_candidates = pcfg["num_candidates"]  # NMS前候选框个数=取中心点热图峰值的个数
+        self.max_num_bbox = pcfg["max_num_bbox"]  # 一张图片上最多保留的目标数
+        self.detection_threshold = pcfg["detection_threshold"]  # 候选框检测到目标的阈值
+        self.iou_threshold = pcfg["iou_threshold"]  # NMS去掉重叠框的IOU阈值
 
     def heatmap_nms(self, heatmaps):
         """

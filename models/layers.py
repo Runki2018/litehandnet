@@ -4,6 +4,23 @@ from models import attention
 from models.attention import NAM_Channel_Att, SELayer, SoftPooling
 
 
+class BRC(nn.Module):
+    """  BN + Relu + Conv2d """    
+    def __init__(self, inp_dim, out_dim, kernel_size=3, stride=1, padding=1, bias=False, dilation=1):
+        super(BRC, self).__init__()
+        self.inp_dim = inp_dim
+        self.conv = nn.Conv2d(inp_dim, out_dim, kernel_size, stride,
+                            padding=padding, bias=bias, dilation=dilation)
+        self.relu = nn.ReLU(inplace=True)
+        self.bn = nn.BatchNorm2d(inp_dim)
+
+    def forward(self, x):     
+        x = self.bn(x)
+        x = self.relu(x)
+        x = self.conv(x)
+        return x
+
+
 class ConvBNReLu(nn.Module):
     def __init__(self, c_in, c_out, k=3, s=1, p=1, bias=False):
         super(ConvBNReLu, self).__init__()
@@ -414,14 +431,14 @@ def channel_shuffle(x, groups):
 
 class SplitDWConv(nn.Module):
     """这个是LiteHrnet中基础模块的简化版"""
-    def __init__(self, in_c, out_c):
+    def __init__(self, in_c, out_c, padding=1, dilation=1):
         super().__init__()
         if in_c == out_c:
             self.conv1x1 = nn.Identity()
         else:       
             self.conv1x1 = ConvBNReLu(in_c, out_c, 1, 1, 0)
         self.att1 = channel_attention3x3(out_c)
-        self.depth_separate_conv = DWConv(out_c // 2, out_c // 2)
+        self.depth_separate_conv = DWConv(out_c // 2, out_c // 2, padding=padding, dilation=dilation)
         self.att2 = channel_attention3x3(out_c // 2)
     
     def forward(self, x):
@@ -486,17 +503,19 @@ class GhostConv(nn.Module):
 class LiteHG(nn.Module):
     def __init__(self, n, f):
         super().__init__()
-        self.up1 = ms_att(f)
+        basic_blocks = Residual if n <= 3 else ms_att
+        
+        self.up1 = basic_blocks(f,f)
         # Lower branch
         self.pool1 = nn.MaxPool2d(2, 2)
-        self.low1 = ms_att(f)
+        self.low1 = basic_blocks(f,f)
         # Recursive hourglass
         if n > 1:
             self.low2 = LiteHG(n - 1, f)
         else:
             # self.low2 = InvertedResidual(nf, nf, dilation=dilation, padding=padding)
-            self.low2 = ms_att(f)
-        self.low3 = ms_att(f)
+            self.low2 = basic_blocks(f,f)
+        self.low3 = basic_blocks(f,f)
         self.up2 = nn.Upsample(scale_factor=2, mode='nearest')
         self.fuse_block = fuse_block(f * 2)
 
@@ -517,33 +536,56 @@ class ms_att(nn.Module):
     """
     https://blog.csdn.net/KevinZ5111/article/details/104730835?utm_medium=distribute.pc_aggpage_search_result.none-task-blog-2~aggregatepage~first_rank_ecpm_v1~rank_v31_ecpm-4-104730835.pc_agg_new_rank&utm_term=block%E6%94%B9%E8%BF%9B+residual&spm=1000.2123.3001.4430
     """
-    def __init__(self, channels):
+    def __init__(self, in_c, out_c):
         super().__init__()
 
-        self.mid1_conv = nn.ModuleList([nn.Sequential(
-                DWConv(channels, channels,mid_relu=False, last_relu=False),
-                DWConv(channels, channels,mid_relu=False), 
-                ) for _ in range(2)
-            ])
-        
-        self.mid2_conv = nn.ModuleList([nn.Sequential( 
-                DWConv(channels, channels, padding=2, dilation=2, mid_relu=False, last_relu=False),
-                DWConv(channels, channels, padding=2, dilation=2, mid_relu=False),
-                ) for _ in range(2)
-            ])
-        
-        self.fuse_block = nn.ModuleList([
-            fuse_block(channels * 2) for _ in range(2)
-        ])
- 
-    def forward(self, x):
-        residual = x
-        for i in range(2):
-            b1 = self.mid1_conv[i](x)
-            b2 = self.mid2_conv[i](x)
-            x = self.fuse_block[i]([b1, b2])
+        mid_c = in_c // 2
+        self.conv1 = BRC(in_c, mid_c, 1, 1, 0)
 
-        out = x + residual
+        self.mid1_conv = nn.ModuleList([
+            nn.Sequential(
+                DWConv(mid_c, mid_c // 2),
+                DWConv(mid_c // 2, mid_c // 2)
+            ), 
+            nn.Sequential(
+                DWConv(mid_c, mid_c),
+                DWConv(mid_c, mid_c),        
+            )])
+        
+        self.mid2_conv = nn.ModuleList([
+            nn.Sequential(
+                DWConv(mid_c, mid_c // 2, dilation=2, padding=2),
+                DWConv(mid_c // 2, mid_c // 2),),
+            nn.Sequential(
+                DWConv(mid_c, mid_c, dilation=2, padding=2),
+                DWConv(mid_c, mid_c))
+            ])
+        # self.conv2 = BRC(2 * mid_c, in_c, 1, 1, 0, bias=False)
+        self.conv3 = BRC(in_c, out_c, 1, 1, 0, bias=False)
+        # self.att = nn.Sequential(
+        #                     nn.AdaptiveAvgPool2d((3,3)),
+        #                     nn.BatchNorm2d(out_c),
+        #                     nn.ReLU(),
+        #                     nn.Conv2d(out_c, out_c, 3, 1, 0, groups=out_c),
+        #                     nn.Flatten(),
+        #                     nn.Dropout(p=0.3),
+        #                     nn.Linear(out_c, out_c),
+        #                     nn.Sigmoid(),  
+        #                     )
+        # self.nam_channel_attention = NAM_Channel_Att(channels=out_c)
+        self.att = channel_attention3x3(in_c)
+
+    def forward(self, x):
+        m = self.conv1(x)
+        for i in range(2):
+            m1 = self.mid1_conv[i](m)
+            m2 = self.mid2_conv[i](m)
+            m = torch.cat([m1, m2], dim=1)
+
+        # features = self.conv2(m) + x
+        features = m + x
+        out = self.conv3(features)
+        out = self.att(features)
         return out
 
 class fuse_block(nn.Module):
@@ -558,6 +600,8 @@ class fuse_block(nn.Module):
                     nn.Flatten(),
                     nn.Linear(channel, channel),
                     nn.Sigmoid(),  
+                    # nn.BatchNorm1d(channel),
+                    # nn.LeakyReLU(inplace=True), 
                     )
 
     def forward(self, x):
@@ -582,7 +626,10 @@ class channel_attention3x3(nn.Module):
                     nn.Flatten(),
                     nn.Linear(channel, channel),
                     nn.Sigmoid(),  
+                    # nn.BatchNorm1d(channel),
+                    # nn.LeakyReLU(inplace=True),  
                     )
+        
 
     def forward(self, x):
         att = self.att(x)

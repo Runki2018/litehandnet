@@ -11,8 +11,11 @@ from utils.heatmap_post_processing import adjust_keypoints_by_DARK, adjust_keypo
 from data.handset.dataset_function import get_bbox
 import torchvision
 
-from config.config import DATASET, parser_cfg, config_dict as cfg
+from config.config import DATASET, pcfg, config_dict as cfg
 
+
+def _fdiv(a, b, rounding_mode='trunc'):
+    return  torch.div(a, b, rounding_mode=rounding_mode)
 
 class ResultParser:
     """
@@ -20,24 +23,26 @@ class ResultParser:
     """
 
     def __init__(self):
-        kernel_size = parser_cfg["region_avg_kernel"]
+        kernel_size = pcfg["region_avg_kernel"]
         self.avg_pool = torch.nn.AvgPool2d(kernel_size,
-                                           parser_cfg["region_avg_stride"],
+                                           pcfg["region_avg_stride"],
                                            (kernel_size - 1) // 2)
         
-        self.max_pool = torch.nn.MaxPool2d(parser_cfg["nms_kernel"],
-                                           parser_cfg["nms_stride"],
-                                           parser_cfg["nms_padding"])
+        self.max_pool = torch.nn.MaxPool2d(pcfg["nms_kernel"],
+                                           pcfg["nms_stride"],
+                                           pcfg["nms_padding"])
 
-        self.num_candidates = parser_cfg["num_candidates"]  # NMS前候选框个数=取中心点热图峰值的个数
-        self.max_num_bbox = parser_cfg["max_num_bbox"]  # 一张图片上最多保留的目标数
-        self.detection_threshold = parser_cfg["detection_threshold"]  # 候选框检测到目标的阈值
-        self.iou_threshold = parser_cfg["iou_threshold"]  # NMS去掉重叠框的IOU阈值
+        self.num_candidates = pcfg["num_candidates"]  # NMS前候选框个数=取中心点热图峰值的个数
+        self.max_num_bbox = pcfg["max_num_bbox"]  # 一张图片上最多保留的目标数
+        self.detection_threshold = pcfg["detection_threshold"]  # 候选框检测到目标的阈值
+        self.iou_threshold = pcfg["iou_threshold"]  # NMS去掉重叠框的IOU阈值
         
+        self.bbox_factor = pcfg["bbox_factor"]
         self.image_size = torch.tensor(cfg['image_size'])  # (256, 256)
+        self.image_area = cfg['image_size'][0] * cfg['image_size'][1]
         self.heatmap_size = torch.tensor(cfg['hm_size'])   # (64, 64)
         # self.feature_stride = self.image_size // self.heatmap_size   # default 4
-        self.feature_stride = torch.div(self.image_size, self.heatmap_size, rounding_mode='trunc')   # default 4
+        self.feature_stride = _fdiv(self.image_size, self.heatmap_size)   # default 4
         self.simdr_split_ratio = cfg['simdr_split_ratio']   # default 2
 
     def heatmap_nms(self, heatmaps):
@@ -67,22 +72,19 @@ class ResultParser:
         return vector
 
     def get_coordinates_from_heatmaps(self, heatmaps):
-        """获取关键点在热图上的坐标"""
-        
-        # todo 怎么分组？
+        """通过取峰值点获取关键点在热图上的坐标""" 
         batch, n_joints, h, w = heatmaps.shape
         top_val, top_idx = torch.topk(heatmaps.reshape((batch, n_joints, -1)), k=1)
 
-        kpts = torch.zeros((batch, self.max_num_bbox, n_joints, 3), dtype=torch.float32).to(heatmaps.device)
+        kpts = torch.zeros((batch, n_joints, 3), dtype=torch.float32).to(heatmaps.device)
         # batch_kpts = torch.zeros((batch, n_joints, 3))
         kpts[..., 0] = (top_idx % w).reshape((batch, 1, n_joints))  # x
-        kpts[..., 1] = torch.div(top_idx, w, rounding_mode='trunc').reshape((batch, 1, n_joints))  # y
+        kpts[..., 1] = _fdiv(top_idx, w).reshape((batch, 1, n_joints))  # y
         # batch_kpts[..., 1] = (top_idx // w).reshape((batch, n_joints))  # y
-        kpts[..., 2] = top_val.reshape((batch, 1, n_joints))  # c: score
+        kpts[..., 2] = top_val.reshape((batch, n_joints))  # c: score
 
         return kpts
 
-    
     # 关键点解析
     def get_coordinates_from_vectors(self, x_vectors, y_vectors, pred_bboxes):
         """获取关键点在1D 向量上的坐标"""
@@ -148,7 +150,7 @@ class ResultParser:
         top_val, top_idx = torch.topk(center_maps.reshape((batch, -1)), k=self.num_candidates)  # (batch, k), (batch, k)
 
         candidates[..., 0] = top_idx % w  # x
-        candidates[..., 1] = torch.div(top_idx, w, rounding_mode='trunc')  # top_idx // w
+        candidates[..., 1] = _fdiv(top_idx, w)  # top_idx // w
 
         # get width and height form size_maps
         size_maps = self.avg_pool(size_maps)  # 对预测的宽高热图进行大小不变的平均池化，然取宽高值只需要取中心点处的值
@@ -161,17 +163,15 @@ class ResultParser:
         candidates[..., 2:4] = candidates[..., 2:4].clip(0, 0.99)  # a ratio: 0~1
         candidates[..., 4] = top_val  # confidence
         
-        kpts = candidates[..., :2]
-        kpts = adjust_keypoints_by_DARK(kpts[:,:, None], center_maps)
-        candidates[..., :2] = torch.as_tensor(kpts[:, :, 0, :], device=device) 
- 
- 
+        for i in range(self.num_candidates):
+            kpt = candidates[:, i:i+1, :2]
+            kpt = adjust_keypoints_by_DARK(kpt, center_maps)
+            candidates[:, i:i+1,:2] = torch.from_numpy(kpt).to(device)
+
         # resize center x,y and size w,h from heatmap to original image
         candidates[..., :2] *= self.feature_stride.to(device)
         candidates[..., 2:4] *= self.image_size.to(device)  # width and height of bbox             
         return candidates
-        
-
 
     def non_max_suppression(self, candidates):
         """
@@ -194,13 +194,16 @@ class ResultParser:
         t = time.time()
         output = [None] * candidates.shape[0]  # batch 张图片的预测框，非None则该图片有预测到目标框
         for i, x in enumerate(candidates):
-            x = x[x[:, 4] > self.detection_threshold]  # confidence 根据obj confidence虑除背景目标
-            x = x[((x[:, 2:4] > min_wh) & (x[:, 2:4] < max_wh)).all(1)]  # # width-height 虑除小目标
+            # confidence 根据obj confidence虑除背景目标
+            x = x[x[:, 4] > self.detection_threshold]  
+            # width-height 虑除小目标
+            x = x[((x[:, 2:4] > min_wh) & (x[:, 2:4] < max_wh)).all(1)]  
 
             if not x.shape[0]:
                 continue  # 如果 x.shape = [0, 4]， 则当前图片没有检测到目标
-
-            boxes = xywh2xyxy(x[:, :4])  # Box (center x, center y, width, height) to (x1, y1, x2, y2)
+                
+            # Box (center x, center y, width, height) to (x1, y1, x2, y2)
+            boxes = xywh2xyxy(x[:, :4])  
             scores = x[:, 4]
             # NMS
             index = torchvision.ops.nms(boxes, scores, self.iou_threshold)
@@ -212,48 +215,149 @@ class ResultParser:
 
         return output
 
-    def parse(self, heatmaps, pred_x=None, pred_y=None, bbox=None):    
+    def parse(self, heatmaps):    
         """
-
-        :param heatmaps: (batch, 5, h, w), h 和 w是热图的的宽高，默认是64
-        :param pred_x:  (batch, n_joints, img_w * k), k is simdr_split_ratio
-        :param pred_y:  (batch, n_joints, img_h * k)
+        :param heatmaps: (batch, 3 + n_joints, h, w), h 和 w是热图的的宽高，默认是64
         :return:  返回原图上的关键点坐标和预测框
                 tensor: [batch, max_num_bbox, n_joints, 3] 
                 list: (n_images, n_boxes, 5)
         """
-        # 1： 获取原图上的边界框
-        center_hm = heatmaps[:, 0:1]        # (batch, 1, h, w)
-        size_hm = heatmaps[:, 1:3]         # (batch, 2, h, w)
-        kpts_hm = heatmaps[:, 3:]       # (batch, 21, h, w)
+        pred_bboxes = self.get_pred_bbox(heatmaps[:, :3])
+        pred_kpts = self.get_pred_kpt(heatmaps[:, 3:])  # [batch, max_num_bbox, n_joints, 3]
         
+        
+        return pred_kpts, pred_bboxes
+    
+    def parse_cycle_detection(self, pred_hm, pred_bboxes):
+        """获取循环检测后映射回原图的关键点坐标
+
+        Args:
+            pred_hm (tensor): p[batch, n_joints, h, w]
+            pred_bboxes (tensor):  [batch, n_bbox, 5]
+        """
+        pred_kpts = self.get_pred_kpt(pred_hm)  # (batch, n_max_object, n_joints, 3)
+        # scale_factor = torch.tensor(pred_bboxes[:][0][]) 
+                
+    
+    def get_pred_bbox(self, region_map):
+        """从 Region map获取bbox
+        Args:
+            region_map (tensor): [batch, 3, h, w]
+
+        Returns:
+            list: [batch, n_bbox, 5]
+        """
+        center_hm = region_map[:, 0:1]        # (batch, 1, h, w)
+        size_hm = region_map[:, 1:3]         # (batch, 2, h, w)
         center_hm = self.heatmap_nms(center_hm)  # 去除部分峰值
         candidates = self.candidate_bbox(center_hm, size_hm)
         pred_bboxes = self.non_max_suppression(candidates)  # list
-
-        # 2： 获取关键点
-        # 在预测框内取峰值
-        bbox = bbox.detach().cpu()
-        # bbox = torch.from_numpy(bbox) 
-        limit_vector_bbox = bbox  # todo 如果是预测框则为 pred_bboxes
-        vector2kpt = self.get_coordinates_from_vectors(pred_x, pred_y, limit_vector_bbox)
-        # 在真值框内取峰值
-        vb2kpt = self.get_coordinates_from_vectors(pred_x, pred_y, bbox)
-        
-        hm2kpt = self.get_coordinates_from_heatmaps(kpts_hm)
+        return pred_bboxes
+    
+    def get_pred_kpt(self, heatmap):
+        """ 获取单手图片的关键点
+        Args:
+            heatmap (tensor): [batch, n_joints, H, W]
+        Returns:
+            tensor: (batch, n_joints, 3)
+        """
+        hm2kpt = self.get_coordinates_from_heatmaps(heatmap)
         device = hm2kpt.device
-        # hm2kpt = adjust_keypoints_by_offset(hm2kpt.clone(), kpts_hm)
-        hm2kpt = adjust_keypoints_by_DARK(hm2kpt.clone(), kpts_hm)
+        # hm2kpt = adjust_keypoints_by_offset(hm2kpt.clone(), heatmap)
+        hm2kpt = adjust_keypoints_by_DARK(hm2kpt.clone(), heatmap)
         hm2kpt = torch.as_tensor(hm2kpt, device=device)
-        hm2kpt[:, :, :, :2] *= self.feature_stride.to(device)  # (batch, n_max_object, n_joints, 3)
+        # hm2kpt[..., :2] *= self.feature_stride.to(device)  # (batch, n_joints, 3)
+        return hm2kpt
+    
+    def get_group_keypoints(self, model, img, bbox_list, heatmaps):
+        """
+            对每个预测框内预测关键点
+        :param bbox_list: (list) [ bbox_list_of_image1, bbox_list_of_image2, ... ], (x, y, w, h, conf) on original img
+        :param heatmaps (tensor): [batch, n_joints, H, W]  经过nms后的关键点预测热图
+        :return: (tensor) (batch, self.max_num_bbox, n_joints, 3)
+        """
+        batch, n_joints, h, w = heatmaps.shape  
+        pred_kpts = torch.zeros((batch, self.max_num_bbox, n_joints, 3))
 
-        return vector2kpt, vb2kpt, hm2kpt, pred_bboxes
+        for img_idx, bboxes in enumerate(bbox_list):
+            if bboxes is None:
+                continue     
+            for bbox_idx, bbox in enumerate(bboxes):  # 图片上一个bbox预测一组关键点。
+                if self._is_cycle_detection(bbox, bboxes, pcfg['cd_iou'], pcfg['cd_ratio']):
+                    pred_kpts[img_idx, bbox_idx] = self._get_second_result(model, img,
+                                                                           bbox, heatmaps, img_idx)
+                else:
+                    pred_kpts[img_idx, bbox_idx] = self._get_first_result(bbox,
+                                                                          heatmaps, img_idx)
+        return pred_kpts
+    
+    def _is_cycle_detection(self, bbox, bboxes, iou_thr=0.3, ratio=0.1):
+        """判断是否需要循环检测： 1、有重合 2、手部区域面积占原图比率小
 
+        Args:
+            bbox (list): [x_center, y_center, w, h]
+            bboxes (list): [bbox1, bbox2, ...]
+            ratio (float, optional):  Defaults to 0.1.
+        """
+        w, h = bbox[2:4]
+        r = (w * h) / self.image_area
+        if r <= ratio and w * h != 0:
+            # print(f"less than {ratio=}")
+            return True
+        
+        iou = bbox_iou(bbox, bboxes, x1y1x2y2=False, DIoU=True)
+        if sum(iou > iou_thr) > 1:
+            return True
+
+        return False
+    
+    def _get_first_result(self, bbox, heatmaps, img_idx:int):
+        """首次检测结果"""
+        feature_stride = self.feature_stride[0]  # (int) default is 4
+        x_center, y_center, w_bbox, h_bbox = [v / feature_stride for v in bbox][:4]
+        # 获取热图上的bbox
+            # 比预测框的区域更大一点，防止预测框预测过小时关键点在区域外
+        w_bbox = int(w_bbox * self.bbox_factor) 
+        h_bbox = int(h_bbox * self.bbox_factor)
+        # 获取预测框的左上角点和右下角点
+        ul_x = max(0, int(x_center - w_bbox / 2 + 0.5))
+        ul_y = max(0, int(y_center - h_bbox / 2 + 0.5))
+        br_x = min(ul_x+w_bbox, heatmaps.shape[3])
+        br_y = min(ul_y+h_bbox, heatmaps.shape[2])
+        
+        # 只是在预测框内匹配关键点。
+        part_heatmaps = heatmaps[img_idx:img_idx+1, :, ul_y:br_y, ul_x:br_x]  
+        kpt = self.get_pred_kpt(part_heatmaps)  # (1, n_joints, 3)
+
+        # 将关键点坐标从限制区域映射会原来的热图大小。
+        kpt[:, :, :2] += torch.tensor([ul_x, ul_y], device=kpt.device)
+        kpt[:, :, :2] *= self.feature_stride.to(kpt.device)
+        return kpt
+  
+    def _get_second_result(self, model, img, bbox, heatmaps, img_idx:int):
+        """循环检测得到二次结果"""
+        x, y, w, h = bbox[:4]
+        W, H = self.image_size
+        x1, y1 = min(0, int(x - w/2 + 0.5)) , min(0, int(y - h/2 + 0.5)) 
+        x2, y2 = max(W, int(x + w/2 + 0.5)) , max(H, int(y + h/2 + 0.5)) 
+        w, h = x2 - x1, y2 - y1
+
+        img_crop = img[img_idx:img_idx+1, :, y1:y2, x1:x2]  # (1, 3, w, h)
+        
+        # mode 默认为nearest， 其他modes: linear | bilinear | bicubic | trilinear
+        img_crop = torch.nn.functional.interpolate(img_crop, size=(W, H)) 
+        hm_list, _, _ = model(img_crop)
+        
+        kpt = self.get_pred_kpt(hm_list[-1][:, 3:])  # (1, n_joints, 3)
+        kpt[:, :, :2] *= self.feature_stride.to(kpt.device)
+        kpt[:, :, :2] *= torch.tensor([w / W, h / H], device=kpt.device)
+        kpt[:, :, :2] += torch.tensor([x1, y1], device=kpt.device)
+        return kpt
+        
     @staticmethod
     def evaluate_ap(pred_bboxes, gt_bboxes, iou_thr=None):
         gt_bboxes = gt_bboxes.tolist() if isinstance(gt_bboxes, torch.Tensor) else gt_bboxes
         ap50, ap = count_ap(pred_boxes=pred_bboxes, gt_boxes=gt_bboxes, iou_threshold=iou_thr)
-
         return ap50, ap
 
     def evaluate_pck(self, pred_kpts, gt_kpts, thr=0.2):
@@ -305,28 +409,3 @@ class ResultParser:
         
         avg_pck = sum(pck_list) / len(pck_list) if len(pck_list) != 0 else 0
         return avg_pck
-
-# ----------------------------------------------
-
-
-if __name__ == '__main__':
-    kpt_hm = torch.zeros((2, 4, 64, 64))
-    kpt_hm[..., 3, 3] = 1
-    kpt_hm[..., 3, 2] = 0.5
-    kpt_hm[..., 2, 3] = 0.5
-
-    c_hm = torch.zeros(2, 1, 64, 64)
-    c_hm[..., 3, 3] = 1
-    s_hm = torch.zeros(2, 2, 64, 64)
-    s_hm[..., 0:7, 0:7] = 1.
-    print(f"{s_hm=}")
-
-    parser = ResultParser()
-    k, b = parser.parse(kpt_hm, c_hm, s_hm, (256, 256))
-    print(f"{k=}")
-    print(f"{b=}")
-    gt_b = [[[12.0, 12.0, 100.44000244140625, 100.44000244140625, 1.0]],
-            [[13.0, 10.0, 253.44000244140625, 253.44000244140625, 1.0]]]
-    a50, a = parser.evaluate_ap(b, gt_b)
-    print(f"{a50=}")
-    print(f"{a=}")

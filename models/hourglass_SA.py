@@ -3,11 +3,13 @@ from pyparsing import TokenConverter
 from pyrsistent import inc
 import torch
 from torch import nn
+from torch.nn import functional as F
 from utils.training_kits import load_pretrained_state
 from config.config import config_dict as cfg
 from models.attention import SELayer, NAM_Channel_Att
 from models.layers import DWConv, LiteHG, fuse_block
 from einops import rearrange, repeat
+from torch.nn import functional as F
 
 class Merge(nn.Module):
     def __init__(self, x_dim, y_dim):
@@ -104,7 +106,7 @@ class Hourglass(nn.Module):
         else:
             self.low2 = basic_block(nf, nf)
         self.low3 = basic_block(nf, f)
-        self.up2 = nn.Upsample(scale_factor=2, mode='nearest')
+        # self.up2 = nn.Upsample(scale_factor=2, mode='nearest')
 
     def forward(self, x):
         up1 = self.up1(x)
@@ -114,7 +116,8 @@ class Hourglass(nn.Module):
         low2 = self.low2(low1)
 
         low3 = self.low3(low2)
-        up2 = self.up2(low3)
+        # up2 = self.up2(low3)
+        up2 = F.interpolate(low3, scale_factor=2)
         return up1 + up2
 
 class MSRB_D_DWConv(nn.Module):
@@ -274,13 +277,13 @@ class HourglassNet_SA(nn.Module):
         self.merge_preds = nn.ModuleList([Merge(oup_dim, inp_dim) for _ in range(nstack - 1)])
         self.nstack = nstack
         
-        image_size = cfg['image_size']  # (w, h)
+        self.image_size = cfg['image_size']  # (w, h)
         k = cfg['simdr_split_ratio']  # default k = 2 
-        in_features = int(image_size[0] * image_size[1] / (4 ** 2))  # 下采样率是4，所以除以16
+        in_features = int(self.image_size[0] * self.image_size[1] / (4 ** 2))  # 下采样率是4，所以除以16
         # self.vector_feature = Residual(inp_dim, cfg['n_joints'])  
-        self.pred_x = nn.Linear(in_features, int(image_size[0] * k)) 
-        self.pred_y = nn.Linear(in_features, int(image_size[1] * k))
-
+        self.pred_x = nn.Linear(in_features, int(self.image_size[0] * k)) 
+        self.pred_y = nn.Linear(in_features, int(self.image_size[1] * k))
+        
     def forward(self, imgs):
         # our posenet
         x = self.pre(imgs)
@@ -295,12 +298,15 @@ class HourglassNet_SA(nn.Module):
             hm_preds.append(preds)
             if i < self.nstack - 1:
                 x = x + self.merge_preds[i](preds) + self.merge_features[i](feature)
-        
+           
         # predict keypoints
         kpts = hm_preds[-1][:, 3:]
+        # if imgs.shape[-1] != self.image_size[0]:
+        #     kpts = F.interpolate(kpts , scale_factor=2, mode='nearest')
         # kpts = self.vector_feature(feature)
         kpts = rearrange(kpts, 'b c h w -> b c (h w)')
         pred_x = self.pred_x(kpts)  # (b, c, w * k)
         pred_y = self.pred_y(kpts)  # (b, c, h * k)   
         return hm_preds, pred_x, pred_y
+
         

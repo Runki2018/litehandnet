@@ -1,3 +1,4 @@
+from unittest import result
 import torch
 import argparse
 import torch.optim as optim
@@ -11,7 +12,6 @@ from utils.evaluation import evaluate_pck, evaluate_ap
 from models.hourglass_SA import HourglassNet_SA as Network
 # from models.LiteHourglass import LiteHourglass as Network
 
-
 from loss.loss import HMSimDRLoss as Loss
 
 from train.distributed_utils import init_distributed_mode, dist, cleanup, reduce_value, reduce_value
@@ -19,7 +19,6 @@ from utils.training_kits import stdout_to_tqdm, load_pretrained_state
 from config.config import config_dict as cfg
 import os
 from data import get_dataset
-
 
 os.environ['CUDA_VISIBLE_DEVICES'] = cfg["CUDA_VISIBLE_DEVICES"]
 exp_id = cfg["experiment_id"]
@@ -45,6 +44,7 @@ def get_argment():
     parser.add_argument('--world-size', default=4, type=int,
                         help='number of distributed processes')
     parser.add_argument('--dist-url', default='env://', help='url used to set up distributed training')
+    # parser.add_argument('--cycle-detection', default=False, help='whether use cycle detection')
     opt = parser.parse_args()
     return opt
 
@@ -75,9 +75,9 @@ class Main:
         # 测试集只在一个GPU上使用
         self.test_set, self.test_loader = get_dataset('test', just_dataset=False)
         # 将训练集按GPU数划分
-        train_set = get_dataset('train', just_dataset=True)  
+        self.train_set = get_dataset('train', just_dataset=True)  
         # 给每个 rank 对于的进程分配训练样本索引
-        self.train_sampler = torch.utils.data.distributed.DistributedSampler(train_set)
+        self.train_sampler = torch.utils.data.distributed.DistributedSampler(self.train_set)
 
         # 将样本索引每batch_size个元素组成一个list
         train_batch_sampler = torch.utils.data.BatchSampler(
@@ -87,7 +87,7 @@ class Main:
                         self.batch_size if self.batch_size > 1 else 0,
                         cfg['workers']])
 
-        self.train_loader = torch.utils.data.DataLoader(train_set,
+        self.train_loader = torch.utils.data.DataLoader(self.train_set,
                                                 batch_sampler=train_batch_sampler,
                                                 pin_memory=True,
                                                 num_workers=num_wokers)
@@ -199,13 +199,21 @@ class Main:
             hm, pred_x, pred_y = self.model(img)
             loss, loss_dict = self.criterion(hm, kpts_hm, 
                                  pred_x, pred_y, target_x, target_y, target_weight)
-            # loss, loss_dict = self.criterion(pred_x, pred_y,
-                                            #  target_x, target_y, target_weight)
 
             loss.backward()
-            # loss = reduce_value(loss, average=True)
             self.optimizer.step()
             self.optimizer.zero_grad()
+            
+            # 开始循环训练
+            if np.random.rand(1) > 0.5:
+                img_crop, target_x, target_y, kpts_hm, bbox_list, gt_kpts = self.train_set.generate_cd_gt(img, gt_kpts, bbox, target_weight)
+                hm, pred_x, pred_y = self.model(img_crop)
+                loss, loss_dict = self.criterion(hm, kpts_hm, 
+                                    pred_x, pred_y, target_x, target_y, target_weight)
+                loss.backward()
+                self.optimizer.step()
+                self.optimizer.zero_grad()
+
 
         with torch.no_grad():
             lr = self.optimizer.param_groups[0]['lr']
@@ -237,53 +245,49 @@ class Main:
         self.model.eval()
         if self.rank == 0:
             with torch.no_grad():
-                xy_pck = []
-                xy_b_pck = []  # 使用真值框
+                # xy_pck = []
                 hm_pck = [0] * self.n_out
+                coor_pck = 0
                 ap50_list = []
                 ap_list = []
                 
-                # parse_ap = []
                 for meta in tqdm(self.test_loader, desc="testing "):
                     meta = [gt.to(self.device) for gt in meta]
                     img, target_x, target_y, target_weight, kpts_hm, bbox, gt_kpts = meta
                     hm, pred_x, pred_y = self.model(img)
-                    # hm, pred_x, pred_y = [kpts_hm], target_x, target_y  # 检查评价指标是否正确
+                    # hm, pred_x, pred_y = [kpts_hm], target_x, target_y
                     
-                    # 结果解析，得到原图关键点和边界框
-                    vector2kpt, vb2kpt, hm2kpt, pred_bboxes = self.result_parser.parse(hm[-1], pred_x, pred_y, bbox)
+                    # 结果解析1，得到原图关键点和边界框
+                    pred_bboxes = self.result_parser.get_pred_bbox(hm[-1][:, :3])
                     
-                    # ap50, ap = self.result_parser.evaluate_ap(pred_bboxes, bbox)
-                    # parse_ap.append(ap* img.shape[0])
+                    pred_kpts = self.result_parser.get_group_keypoints(self.model, img, pred_bboxes, hm[-1][:, 3:])
                     
                     ap50, ap, _ = evaluate_ap(hm[-1][:, :3], bbox)
                     ap50_list.append(ap50* img.shape[0])
                     ap_list.append(ap* img.shape[0])
                     
-                    avg_xy_pck = self.result_parser.evaluate_pck(vector2kpt, gt_kpts, thr=cfg['pck_thr'])
-                    # avg_xy_b_pck = self.result_parser.evaluate_pck(vb2kpt, gt_kpts, thr=cfg['pck_thr'])
-                    # avg_hm_pck = self.result_parser.evaluate_pck(hm2kpt, gt_kpts, thr=0.2)
-
-                    xy_pck.append(avg_xy_pck * img.shape[0]) 
-                    # xy_b_pck.append(avg_xy_b_pck * img.shape[0]) 
+                    # vector2kpt = self.result_parser.get_coordinates_from_vectors(pred_x, pred_y, pred_bboxes) 
+                    # avg_xy_pck = self.result_parser.evaluate_pck(vector2kpt, gt_kpts, thr=cfg['pck_thr'])         
+                    # xy_pck.append(avg_xy_pck * img.shape[0]) 
                     
                     for i in range(self.n_out):
-                        avg_hm_pck = evaluate_pck(hm[i][:, 3:], kpts_hm[:, 3:], bbox, target_weight, thr=cfg['pck_thr']).item()       
+                        avg_hm_pck = evaluate_pck(hm[i][:, 3:], kpts_hm[:, 3:], bbox, target_weight, cfg['pck_thr']).item()       
                         hm_pck[i] += avg_hm_pck * img.shape[0]
+
+                    # print(f"{pred_kpts=}")
+                    # print(f"{gt_kpts=}")
+                    coor_pck += self.result_parser.evaluate_pck(pred_kpts.to(gt_kpts.device), gt_kpts, cfg['pck_thr']) * img.shape[0]
                     
                 # 记录训练数据     
-                PCK_vector = sum(xy_pck) / self.test_set.__len__() * 100
-                PCK_bbox_vector = sum(xy_b_pck) / self.test_set.__len__() * 100
+                # PCK_vector = sum(xy_pck) / self.test_set.__len__() * 100
                 PCK_hm = [p / self.test_set.__len__() * 100 for p in hm_pck]
-                
-                # parse_ap = sum(parse_ap) / self.test_set.__len__() * 100
-                # print(f"{parse_ap=}")
                 
                 ap_final = sum(ap_list) / self.test_set.__len__() * 100
                 ap50_final = sum(ap50_list) / self.test_set.__len__() *100
-                print(f"  {PCK_vector=} \n  {PCK_bbox_vector=}\n AP = {ap_final}\n  AP50 = {ap50_final}")
+                print(f"AP = {ap_final}\nAP50 = {ap50_final}")
                 for i, pck in enumerate(PCK_hm):
                     print(f"{i=}\t{pck=}")
+                print(f"Coordinate PCK = {coor_pck / self.test_set.__len__() *100}")
 
                 # 记录训练数据
                 # self.save_dict["mPCK"].append(PCK_hm[-1])
@@ -320,7 +324,7 @@ class Main:
             save_flag = True
         elif best_pck:
             file_name = "/{0}_PCK_{1}epoch.pt".format(round(self.best_mPCK, 3), self.epoch)
-            save_flag = False if self.best_mPCK < 92 else True       
+            save_flag = False if self.best_mPCK < 85 else True       
         elif best_ap:
             file_name = "/{0}_AP_{1}epoch.pt".format(round(self.best_ap, 3), self.epoch)
             save_flag = False if self.best_ap < 40 else True
@@ -358,7 +362,5 @@ if __name__ == '__main__':
     # 创建多个进程，每个进程解析一次参数和创建一个main类实例
     opt = get_argment()
     Main(opt).run()
-    # python -m torch.distributed.launch --nproc_per_node=4 --use_env train_distributed.py
-    # CUDA_VISIBLE_DEVICES=2,3 python -m torch.distributed.launch --nproc_per_node=2 --use_env --master_port 29501 train_distributed.py
 
     # CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 train_distributed_center_simdr_freihand.py

@@ -7,21 +7,7 @@ from collections import defaultdict
 from utils.bbox_metric import xywh2xyxy, box_iou, bbox_iou
 import torchvision
 
-from config.config import DATASET, parser_cfg, config_dict as cfg
-
-
-# def max_match(scores):
-#     """
-#         用匈牙利算法实现二部图的最大匹配问题：
-#         匈牙利算法的的库实现：http://software.clapper.org/munkres/
-#     :param scores:
-#     :return:
-#     """
-#     m = munkres.Munkres()
-#     assoc = m.compute(scores)
-#     assoc = np.array(assoc).astype(np.int32)
-#     return assoc
-
+from config.config import DATASET, pcfg, config_dict as cfg
 
 # derived from https://github.com/HRNet/HigherHRNet-Human-Pose-Estimation/
 class HeatmapParser:
@@ -34,23 +20,23 @@ class HeatmapParser:
         self.dataset = DATASET
         self.n_joints = cfg["n_joints"]
         self.image_size = cfg["image_size"]  # 输入网络的图像的大小
-        self.num_candidates = parser_cfg["num_candidates"]  # NMS前候选框个数=取中心点热图峰值的个数
-        self.max_num_bbox = parser_cfg["max_num_bbox"]  # 一张图片上最多保留的目标数
+        self.num_candidates = pcfg["num_candidates"]  # NMS前候选框个数=取中心点热图峰值的个数
+        self.max_num_bbox = pcfg["max_num_bbox"]  # 一张图片上最多保留的目标数
 
-        self.max_pool = torch.nn.MaxPool2d(parser_cfg["nms_kernel"],
-                                           parser_cfg["nms_stride"],
-                                           parser_cfg["nms_padding"])
-        self.avg_pool = torch.nn.AvgPool2d(parser_cfg["region_avg_kernel"],
-                                           parser_cfg["region_avg_stride"],
-                                           parser_cfg["region_avg_padding"])
+        self.max_pool = torch.nn.MaxPool2d(pcfg["nms_kernel"],
+                                           pcfg["nms_stride"],
+                                           pcfg["nms_padding"])
+        self.avg_pool = torch.nn.AvgPool2d(pcfg["region_avg_kernel"],
+                                           pcfg["region_avg_stride"],
+                                           pcfg["region_avg_padding"])
 
-        self.detection_threshold = parser_cfg["detection_threshold"]  # 候选框检测到目标的阈值
-        self.iou_threshold = parser_cfg["iou_threshold"]  # NMS去掉重叠框的IOU阈值
-        self.tag_threshold = parser_cfg["tag_threshold"]
-        self.use_detection_val = parser_cfg["use_detection_val"]
-        self.ignore_too_much = parser_cfg["ignore_too_much"]
-        self.bbox_factor = parser_cfg["bbox_factor"]  # 限制区域为预测框大一点点的区域，这个因子决定了放缩大小
-        self.bbox_k = parser_cfg["bbox_k"]  # 限制区域内每张热图取得分前k个候选点。
+        self.detection_threshold = pcfg["detection_threshold"]  # 候选框检测到目标的阈值
+        self.iou_threshold = pcfg["iou_threshold"]  # NMS去掉重叠框的IOU阈值
+        self.tag_threshold = pcfg["tag_threshold"]
+        self.use_detection_val = pcfg["use_detection_val"]
+        self.ignore_too_much = pcfg["ignore_too_much"]
+        self.bbox_factor = pcfg["bbox_factor"]  # 限制区域为预测框大一点点的区域，这个因子决定了放缩大小
+        self.bbox_k = pcfg["bbox_k"]  # 限制区域内每张热图取得分前k个候选点。
 
     def nms(self, heatmaps):
         """
@@ -260,15 +246,4 @@ class HeatmapParser:
         pred_keypoints = self.adjust_keypoints(pred_keypoints, heatmaps)
 
         return pred_keypoints, bbox_list
-
-
-if __name__ == '__main__':
-    pass
-    # 验证函数正确性
-    hm = torch.rand(2, 22, 88, 88)
-    tm = torch.rand(2, 22, 88, 88)
-    sm = torch.rand(2, 2, 88, 88)
-
-    c = HeatmapParser()
-    c.parse(hm, sm, tm)
 
