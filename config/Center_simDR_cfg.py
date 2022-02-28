@@ -53,6 +53,6 @@ HG_cfg = {
     "n_epochs": 110,
     "reload": True,
     "just_model": True,
-    "checkpoint": "checkpoint/final_all/ME-att/1HG-ME-att-rand_cd_ls-c128-h4-k2-o64/2022-02-26/99.942_AP_0epoch.pt",
+    "checkpoint": "./checkpoint/final_all/ME-att/ls/1HG-ME-att-rand_cd-ls-c128-h4-k2-o64/2022-02-28/72.231_AP_36epoch.pt",
     "save_root": "./checkpoint/final_all/ME-att/ls/"
 }
