@@ -44,6 +44,8 @@ class ResultParser:
         # self.feature_stride = self.image_size // self.heatmap_size   # default 4
         self.feature_stride = _fdiv(self.image_size, self.heatmap_size)   # default 4
         self.simdr_split_ratio = cfg['simdr_split_ratio']   # default 2
+        self.bbox_alpha = cfg['bbox_alpha']
+        self.cd_reduction = cfg['cycle_detection_reduction']
 
     def heatmap_nms(self, heatmaps):
         """
@@ -344,13 +346,14 @@ class ResultParser:
 
         img_crop = img[img_idx:img_idx+1, :, y1:y2, x1:x2]  # (1, 3, w, h)
         
+        size = H // self.cd_reduction, W // self.cd_reduction
         # mode 默认为nearest， 其他modes: linear | bilinear | bicubic | trilinear
-        img_crop = torch.nn.functional.interpolate(img_crop, size=(W, H)) 
+        img_crop = torch.nn.functional.interpolate(img_crop, size=size) 
         hm_list, _, _ = model(img_crop)
         
         kpt = self.get_pred_kpt(hm_list[-1][:, 3:])  # (1, n_joints, 3)
         kpt[:, :, :2] *= self.feature_stride.to(kpt.device)
-        kpt[:, :, :2] *= torch.tensor([w / W, h / H], device=kpt.device)
+        kpt[:, :, :2] *= torch.tensor([w / size[1], h / size[0]], device=kpt.device)
         kpt[:, :, :2] += torch.tensor([x1, y1], device=kpt.device)
         return kpt
         
@@ -385,7 +388,7 @@ class ResultParser:
             # 计算bbox的w,h
             (x1, y1), _ = gt_vis[:, :2].min(dim=0)
             (x2, y2), _ = gt_vis[:, :2].max(dim=0)
-            w, h = x2 - x1, y2 - y1
+            w, h = np.array([x2 - x1, y2 - y1]) * self.bbox_alpha
             
             pck = torch.sum(torch.norm(gt_vis-pred_vis,p=2, dim=1) / max(w, h) < thr) / gt_vis.shape[0]
             return pck.item()

@@ -23,10 +23,6 @@ from data import get_dataset
 os.environ['CUDA_VISIBLE_DEVICES'] = cfg["CUDA_VISIBLE_DEVICES"]
 exp_id = cfg["experiment_id"]
 
-torch.backends.cudnn.enabled = True
-torch.backends.cudnn.benchmark = True
-
-
 def get_argment():
     parser = argparse.ArgumentParser(description="Define DDP training parameters.")
     parser.add_argument('--epochs', type=int, default=cfg['n_epochs'])
@@ -90,6 +86,7 @@ class Main:
         self.train_loader = torch.utils.data.DataLoader(self.train_set,
                                                 batch_sampler=train_batch_sampler,
                                                 pin_memory=True,
+                                                shuffle=False,
                                                 num_workers=num_wokers)
 
         # 多GPU训练
@@ -206,7 +203,7 @@ class Main:
             
             # 开始循环训练
             if np.random.rand(1) > 0.5:
-                img_crop, target_x, target_y, kpts_hm, bbox_list, gt_kpts = self.train_set.generate_cd_gt(img, gt_kpts, bbox, target_weight)
+                img_crop, target_x, target_y, kpts_hm = self.train_set.generate_cd_gt(img, gt_kpts, bbox, target_weight)
                 hm, pred_x, pred_y = self.model(img_crop)
                 loss, loss_dict = self.criterion(hm, kpts_hm, 
                                     pred_x, pred_y, target_x, target_y, target_weight)
@@ -292,7 +289,7 @@ class Main:
                 # 记录训练数据
                 self.save_dict["mPCK"].append(PCK_hm[-1])
                 self.save_dict["ap"].append(ap_final)
-                # self.writer.add_scalars('mPCK', {'pck_vector': PCK_vector, 'pck_hm': PCK_hm}, self.epoch)
+                self.writer.add_scalars('mPCK', {f"pck_{i}": v for i, v in enumerate(PCK_hm)}, self.epoch)
                 self.writer.add_scalars('AP', {"AP50": ap50_final, "AP": ap_final}, self.epoch)
 
                 if len(self.save_dict["mPCK"]) > 3:

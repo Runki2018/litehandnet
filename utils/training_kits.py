@@ -23,10 +23,12 @@ def set_seeds(seed=1, cuda_deterministic=True):
     torch.cuda.manual_seed_all(seed)
     if cuda_deterministic:  # slower, more reproducible
         torch.backends.cudnn.deterministic = True  # 保证每次卷积算法返回结果一样
-        torch.backends.cudnn.benchmark = False  # 保证每次cudnn使用的都是同一种算法，而不是自行选择最优算法
+        torch.backends.cudnn.benchmark = False  # 自行选择最优算法, 优化第二次执行时执行时间
+        torch.backends.cudnn.enabled = False  # 确定性算法
     else:  # faster, less reproducible
         torch.backends.cudnn.deterministic = False
         torch.backends.cudnn.benchmark = True
+        torch.backends.cudnn.enabled = True
 
 def load_pretrained_state(model_state, pretrained_state):
     """根据保持模型参数的关键字进行参数加载， 两个模型的不需要完全一致"""

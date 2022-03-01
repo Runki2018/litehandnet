@@ -1,5 +1,5 @@
 HG_cfg = {
-    "experiment_id": "1HG-ME-att-rand_cd-ls-c128-h4-k2-o64",
+    "experiment_id": "1HG-ME-att-c128-h4-k2-o64-ba15-half",
     'dataset': 'freihand',
     # model structure:
     'n_joints': 21,  # keypoints + region map
@@ -17,7 +17,7 @@ HG_cfg = {
     'out_kernel': 1, # 1 or 3
     'main_channels': 128,
     'simdr_split_ratio' : 2,
-    'cycle_detection_reduction': 1,  # 循环检测分辨率下降因子
+    'cycle_detection_reduction': 2,  # 循环检测分辨率下降因子
     "nstack": 1,  
     "param": (1, 1, 1),   # assert len(param) == nstack + higher_output
     'increase': 0,
@@ -44,15 +44,15 @@ HG_cfg = {
     'workers': 8,
 
     "CUDA_VISIBLE_DEVICES": "0, 1, 2, 3",
-    'eval_interval': 2,
+    'eval_interval': 1,
     'pck_thr': 0.2, 
     'optim': 'AdamW',  # 'SGD', ' AdamW' or RMSprop
     "lr": 1e-3,  # 初始学习率，最小学习率约为 0.01 * lr
-    'T': 50,  # 周期
+    'T': 40,  # 周期
     'lr_gamma': 0.8,  # 每周期学习率递减因子
-    "n_epochs": 110,
+    "n_epochs": 120,
     "reload": True,
     "just_model": True,
-    "checkpoint": "./checkpoint/final_all/ME-att/ls/1HG-ME-att-rand_cd-ls-c128-h4-k2-o64/2022-02-28/72.231_AP_36epoch.pt",
+    "checkpoint": "checkpoint/final_all/ME-att/ls/1HG-ME-att-rand_cd-ls-c128-h4-k2-o64/2022-02-28/72.231_AP_36epoch.pt",
     "save_root": "./checkpoint/final_all/ME-att/ls/"
 }

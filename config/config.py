@@ -34,7 +34,6 @@ freihand = {
     # "test_file": r"./split_testset/freihand/small.json",
     "test_file": r"/home/user/PycharmProjects/Dataset/freiHand/annotations/freihand_test.json",
     "train_file": r"/home/user/PycharmProjects/Dataset/freiHand/annotations/freihand_train.json",
-    # "test_file": r"/home/user/PycharmProjects/Dataset/freiHand/annotations/freihand_train.json",
     "thr_list": [0.12740034726360222, 0.17060353893099983, 0.21433420109795465],
     "n_bbox": [19364, 34144, 35592, 15092],
 }

@@ -279,8 +279,7 @@ class HourglassNet_SA(nn.Module):
         
         self.image_size = cfg['image_size']  # (w, h)
         k = cfg['simdr_split_ratio']  # default k = 2 
-        in_features = int(self.image_size[0] * self.image_size[1] / (4 ** 2))  # 下采样率是4，所以除以16
-        # self.vector_feature = Residual(inp_dim, cfg['n_joints'])  
+        in_features = int(self.image_size[0] * self.image_size[1] / (4 ** 2))  # 下采样率是4，所以除以16  
         self.pred_x = nn.Linear(in_features, int(self.image_size[0] * k)) 
         self.pred_y = nn.Linear(in_features, int(self.image_size[1] * k))
         
@@ -301,9 +300,8 @@ class HourglassNet_SA(nn.Module):
            
         # predict keypoints
         kpts = hm_preds[-1][:, 3:]
-        # if imgs.shape[-1] != self.image_size[0]:
-        #     kpts = F.interpolate(kpts , scale_factor=2, mode='nearest')
-        # kpts = self.vector_feature(feature)
+        if imgs.shape[-1] != self.image_size[0]:
+            kpts = F.interpolate(kpts , scale_factor=2, mode='nearest')
         kpts = rearrange(kpts, 'b c h w -> b c (h w)')
         pred_x = self.pred_x(kpts)  # (b, c, w * k)
         pred_y = self.pred_y(kpts)  # (b, c, h * k)   
