@@ -6,7 +6,6 @@
 # from config.RKNet_handset_cfg import HG_cfg as config_dict
 from config.Center_simDR_cfg import HG_cfg as config_dict
 
-
 mpii = {
     "name": "mpii",
     "root": "./data/mpii/",
@@ -30,66 +29,18 @@ zhhand = {
 
 freihand = {
     "name": "freihand",
-    "root": r"/home/user/PycharmProjects/Dataset/freiHand/",
-    # "test_file": r"./split_testset/freihand/small.json",
-    "test_file": r"/home/user/PycharmProjects/Dataset/freiHand/annotations/freihand_test.json",
-    "train_file": r"/home/user/PycharmProjects/Dataset/freiHand/annotations/freihand_train.json",
+    "root": r"/root/data/Dataset/freiHAND/",
+    "test_file": r"./split_testset/freihand/large.json",
+    # "test_file": r"/root/data/Dataset/freiHAND/annotations/freihand_test.json",
+    "train_file": r"/root/data/Dataset/freiHAND/annotations/freihand_train.json",
     "thr_list": [0.12740034726360222, 0.17060353893099983, 0.21433420109795465],
     "n_bbox": [19364, 34144, 35592, 15092],
-}
-freihand100 = {
-    "name": "freihand100",
-    "root": r"/home/user/PycharmProjects/Dataset/freiHand/",
-    "test_file": "./data/handset/freihand100.json",
-    "train_file": "./data/handset/freihand100.json",
-    "thr_list": [0.12740034726360222, 0.17060353893099983, 0.21433420109795465],
-    "n_bbox": [19364, 34144, 35592, 15092],
-}
-
-zhhand20 = {
-    "name": "zhhand20",
-    "root": "/home/data2/ZHhands/allocate_dataset/",
-    "train_file": "./data/handset/zhhand20.json",
-    "test_file": "./data/handset/zhhand20.json",
-    "thr_list": [0.20962208537055094, 0.4084713988053167, 0.6853853875598244],
-}
-
-zhhand100 = {
-    "name": "zhhand100",
-    "root": "/home/data2/ZHhands/allocate_dataset/",
-    "train_file": "./data/handset/zhhand20.json",
-    "test_file": "./data/handset/zhhand20.json",
-    "thr_list": [0.20962208537055094, 0.4084713988053167, 0.6853853875598244],
-    "n_bbox": [371, 301, 154, 51]
-}
-
-zhhand877 = {
-    "name": "zhhand877",
-    "root": "/home/data2/ZHhands/allocate_dataset/",
-    "train_file": "../data/900_train_test.json",
-    "test_file": "../data/900_train_test.json",
-    "thr_list": [0.20962208537055094, 0.4084713988053167, 0.6853853875598244],
-    "n_bbox": [371, 301, 154, 51]
-}
-
-zhhand877_host = {
-    "name": "zhhand877_host",
-    "root": "D:/python/project/LabelKPs/sample/",
-    "train_file": "../data/900_train_test.json",
-    "test_file": "../data/900_train_test.json",
-    "thr_list": [0.20962208537055094, 0.4084713988053167, 0.6853853875598244],
-    "n_bbox": [371, 301, 154, 51]
 }
 
 Dataset = {
     "mpii": mpii,
     "zhhand": zhhand,
-    "zhhand20": zhhand20,
-    "zhhand100": zhhand100,
-    "zhhand877": zhhand877,
     "freihand": freihand,
-    "freihand100": freihand100,
-    "zhhand877_host": zhhand877_host,
 }
 
 seed = 1
@@ -116,7 +67,6 @@ pcfg = {
     'blue_kernel': 19,  # 高斯模糊的核大小，DARK 默认为11
     
     'cd_iou': 0.3, # 循环检测阈值，边框IOU
-    'cd_ratio': 0.1, # 循环检测阈值, 手部区域占比
-    
+    'cd_ratio': 1, # 循环检测阈值, 手部区域占比 
 }
 

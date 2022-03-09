@@ -33,11 +33,15 @@ class HMSimDRLoss(nn.Module):
     
     def forward(self, hm, hm_gt,
                 output_x, output_y,
-                target_x, target_y, target_weight):
+                target_x, target_y, target_weight, cd=False):
         
         hm_loss = 0
+        region_loss = 0
         for hm_i in hm:
-            hm_loss += self.hm_loss(hm_i, hm_gt)
+            hm_loss += self.hm_loss(hm_i[:, 3:], hm_gt[:, 3:])
+            if not cd:
+                region_loss += self.hm_loss(hm_i[:, :3], hm_gt[:, :3])
+        hm_loss = hm_loss + region_loss
         vector_loss = self.vector_loss(output_x, output_y, target_x, target_y, target_weight)
         
         loss_sum = 0

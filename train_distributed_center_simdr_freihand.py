@@ -1,4 +1,3 @@
-from unittest import result
 import torch
 import argparse
 import torch.optim as optim
@@ -202,8 +201,8 @@ class Main:
             self.optimizer.zero_grad()
             
             # 开始循环训练
-            if np.random.rand(1) > 0.5:
-                img_crop, target_x, target_y, kpts_hm = self.train_set.generate_cd_gt(img, gt_kpts, bbox, target_weight)
+            if np.random.rand(1) > 0.4:
+                img_crop, target_x, target_y, kpts_hm, _ = self.train_set.generate_cd_gt(img, gt_kpts, bbox, target_weight)
                 hm, pred_x, pred_y = self.model(img_crop)
                 loss, loss_dict = self.criterion(hm, kpts_hm, 
                                     pred_x, pred_y, target_x, target_y, target_weight)
@@ -270,9 +269,7 @@ class Main:
                     for i in range(self.n_out):
                         avg_hm_pck = evaluate_pck(hm[i][:, 3:], kpts_hm[:, 3:], bbox, target_weight, cfg['pck_thr']).item()       
                         hm_pck[i] += avg_hm_pck * img.shape[0]
-
-                    # print(f"{pred_kpts=}")
-                    # print(f"{gt_kpts=}")
+                        
                     coor_pck += self.result_parser.evaluate_pck(pred_kpts.to(gt_kpts.device), gt_kpts, cfg['pck_thr']) * img.shape[0]
                     
                 # 记录训练数据     
@@ -347,7 +344,7 @@ class Main:
                 self.epoch = epoch
 
                 self.train_sampler.set_epoch(epoch)
-                self.train()
+                # self.train()
                 if (epoch % cfg['eval_interval']) == 0:
                     self.test()
             if self.rank == 0:

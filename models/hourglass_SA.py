@@ -300,8 +300,8 @@ class HourglassNet_SA(nn.Module):
            
         # predict keypoints
         kpts = hm_preds[-1][:, 3:]
-        if imgs.shape[-1] != self.image_size[0]:
-            kpts = F.interpolate(kpts , scale_factor=2, mode='nearest')
+        # if imgs.shape[-1] != self.image_size[0]:
+        #     kpts = F.interpolate(kpts , scale_factor=2, mode='nearest')
         kpts = rearrange(kpts, 'b c h w -> b c (h w)')
         pred_x = self.pred_x(kpts)  # (b, c, w * k)
         pred_y = self.pred_y(kpts)  # (b, c, h * k)   
