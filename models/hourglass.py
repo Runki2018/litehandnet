@@ -1,8 +1,8 @@
 import torch
 from torch import nn
 from utils.training_kits import load_pretrained_state
-from models.hourglass_SA import ME_att
-from config.config import config_dict as cfg
+from models.pose_hg_ms_att import ME_att
+from config import config_dict as cfg
 
 
 class Merge(nn.Module):

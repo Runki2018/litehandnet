@@ -8,7 +8,7 @@ from data.handset.dataset_function import *
 from utils.data_augmentation import adjust_gamma, adjust_sigmoid, homography, horizontal_flip
 
 from utils.training_kits import set_seeds
-from config.config import seed, DATASET, pcfg, config_dict as cfg
+from config import seed, DATASET, pcfg, config_dict as cfg
 
 # Prevent OpenCV from multithreading (to use PyTorch DataLoader)
 cv2.setNumThreads(0)

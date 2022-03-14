@@ -12,9 +12,9 @@ from utils.top_down_eval import pose_pck_accuracy
 # sys.path.insert(0, os.path.abspath('..' + '/'))
 # print(sys.path)
 
-from models.hourglass_SA import HourglassNet_SA as Network
+from models.pose_hg_ms_att import MultiScaleAttentionHourglass as Network
 from data import get_dataset
-from config.config import DATASET, config_dict as cfg
+from config import DATASET, config_dict as cfg
 from utils.training_kits import load_pretrained_state
 from utils.visualization_tools import draw_heatmaps, draw_region_maps, draw_point, draw_bbox, draw_text
 

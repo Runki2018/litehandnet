@@ -6,7 +6,7 @@ from utils.bbox_metric import xywh2xyxy, box_iou, bbox_iou
 from utils.evaluation import count_ap
 import torchvision
 
-from config.config import DATASET, pcfg, config_dict as cfg
+from config import DATASET, pcfg, config_dict as cfg
 
 
 class HeatmapParser_SH:

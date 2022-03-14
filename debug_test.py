@@ -4,7 +4,7 @@ import cv2
 from utils.training_kits import stdout_to_tqdm, load_pretrained_state
 
 from data import get_dataset
-from config.config import DATASET, config_dict
+from config import DATASET, config_dict
 from utils.visualization_tools import draw_heatmaps, draw_region_maps, draw_point, draw_bbox, draw_text,draw_centermap
 from models.center_simDR import LiteHourglassNet as Network
 from utils.CenterSimDRParser import ResultParser

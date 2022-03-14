@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 from models.layers import Conv, Residual, Hourglass, BasicBlock, ConvBNReLu
-from config.config import config_dict as cfg
+from config import config_dict as cfg
 
 
 class RegionKeypointNetwork(nn.Module):

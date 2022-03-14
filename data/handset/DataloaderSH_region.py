@@ -7,9 +7,6 @@ from torchvision import transforms
 from data.handset.dataset_function import *
 from utils.data_augmentation import adjust_gamma, adjust_sigmoid, homography, horizontal_flip
 
-from utils.training_kits import set_seeds
-from config.config import seed, DATASET, pcfg, config_dict as cfg
-
 # Prevent OpenCV from multithreading (to use PyTorch DataLoader)
 cv2.setNumThreads(0)
 # set_seeds(seed)
@@ -25,7 +22,7 @@ class HandData(Dataset):
         通道顺序： 0~1，宽高热图，2：背景热图， 3~24：中心点热图和21个关键点热图
     """
 
-    def __init__(self, img_root, ann_file, is_train=False):
+    def __init__(self, img_root, ann_file, cfg, is_train=False):
 
         super(HandData, self).__init__()
         self.img_root = img_root
@@ -153,18 +150,20 @@ class HandData(Dataset):
     
 
 class RegionLoader:
-    def __init__(self):
+    def __init__(self, cfg, DATASET):
         self.batch_size = cfg["batch_size"]
         self.num_workers = cfg["workers"]
         self.root = DATASET['root']
         self.test_file = DATASET['test_file']
         self.train_file = DATASET['train_file']
+        self.cfg = cfg
 
     def test(self, just_dataset=False):
         """
         :return: the data loader of testing dataset
         """
-        dataset = HandData(img_root=self.root, ann_file=self.test_file, is_train=False)
+        dataset = HandData(img_root=self.root, ann_file=self.test_file,
+                           cfg=self.cfg, is_train=False)
         print("sample number of testing dataset: ", dataset.__len__())
         if just_dataset:
             return dataset
@@ -180,7 +179,8 @@ class RegionLoader:
         """
         :return dataset and the data loader of training dataset
         """
-        dataset = HandData(img_root=self.root, ann_file=self.train_file, is_train=True)
+        dataset = HandData(img_root=self.root, ann_file=self.train_file,
+                           cfg=self.cfg, is_train=True)
         print("sample number of training dataset: ", dataset.__len__())
         if just_dataset:
             return dataset

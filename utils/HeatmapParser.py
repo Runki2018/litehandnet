@@ -7,7 +7,7 @@ from collections import defaultdict
 from utils.bbox_metric import xywh2xyxy, box_iou, bbox_iou
 import torchvision
 
-from config.config import DATASET, pcfg, config_dict as cfg
+from config import DATASET, pcfg, config_dict as cfg
 
 # derived from https://github.com/HRNet/HigherHRNet-Human-Pose-Estimation/
 class HeatmapParser:

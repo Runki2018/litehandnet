@@ -1,17 +1,12 @@
-from functools import total_ordering
 import time
-from cv2 import KeyPoint
-
 import torch
 import numpy as np
-from collections import defaultdict
 from utils.bbox_metric import xywh2xyxy, box_iou, bbox_iou
 from utils.evaluation import count_ap
 from utils.heatmap_post_processing import adjust_keypoints_by_DARK, adjust_keypoints_by_offset
-from data.handset.dataset_function import get_bbox
 import torchvision
 
-from config.config import DATASET, pcfg, config_dict as cfg
+from config import DATASET, pcfg, config_dict as cfg
 
 
 def _fdiv(a, b, rounding_mode='trunc'):
@@ -76,7 +71,10 @@ class ResultParser:
     def get_coordinates_from_heatmaps(self, heatmaps):
         """通过取峰值点获取关键点在热图上的坐标""" 
         batch, n_joints, h, w = heatmaps.shape
-        top_val, top_idx = torch.topk(heatmaps.reshape((batch, n_joints, -1)), k=1)
+        try:    
+            top_val, top_idx = torch.topk(heatmaps.reshape((batch, n_joints, -1)), k=1)
+        except RuntimeError:
+            print(f"\n\n{heatmaps.shape=}\n\n")
 
         kpts = torch.zeros((batch, n_joints, 3), dtype=torch.float32).to(heatmaps.device)
         # batch_kpts = torch.zeros((batch, n_joints, 3))
@@ -318,17 +316,21 @@ class ResultParser:
         feature_stride = self.feature_stride[0]  # (int) default is 4
         x_center, y_center, w_bbox, h_bbox = [v / feature_stride for v in bbox][:4]
         # 获取热图上的bbox
-            # 比预测框的区域更大一点，防止预测框预测过小时关键点在区域外
+        # 比预测框的区域更大一点，防止预测框预测过小时关键点在区域外
         w_bbox = int(w_bbox * self.bbox_factor) 
         h_bbox = int(h_bbox * self.bbox_factor)
-        # 获取预测框的左上角点和右下角点
-        ul_x = max(0, int(x_center - w_bbox / 2 + 0.5))
-        ul_y = max(0, int(y_center - h_bbox / 2 + 0.5))
-        br_x = min(ul_x+w_bbox, heatmaps.shape[3])
-        br_y = min(ul_y+h_bbox, heatmaps.shape[2])
-        
-        # 只是在预测框内匹配关键点。
-        part_heatmaps = heatmaps[img_idx:img_idx+1, :, ul_y:br_y, ul_x:br_x]  
+        if w_bbox * h_bbox != 0:
+            # 获取预测框的左上角点和右下角点
+            ul_x = max(0, int(x_center - w_bbox / 2 + 0.5))
+            ul_y = max(0, int(y_center - h_bbox / 2 + 0.5))
+            br_x = min(ul_x+w_bbox, heatmaps.shape[3])
+            br_y = min(ul_y+h_bbox, heatmaps.shape[2])
+            
+            # 只是在预测框内匹配关键点。
+            part_heatmaps = heatmaps[img_idx:img_idx+1, :, ul_y:br_y, ul_x:br_x]       
+        else:
+            ul_x, ul_y = 0, 0
+            part_heatmaps = heatmaps[img_idx:img_idx+1] 
         kpt = self.get_pred_kpt(part_heatmaps)  # (1, n_joints, 3)
 
         # 将关键点坐标从限制区域映射会原来的热图大小。
@@ -339,18 +341,22 @@ class ResultParser:
     def _get_second_result(self, model, img, bbox, heatmaps, img_idx:int):
         """循环检测得到二次结果"""
         x, y, w, h = bbox[:4]
-        W, H = self.image_size
-        x1, y1 = min(0, int(x - w/2 + 0.5)) , min(0, int(y - h/2 + 0.5)) 
-        x2, y2 = max(W, int(x + w/2 + 0.5)) , max(H, int(y + h/2 + 0.5)) 
-        w, h = x2 - x1, y2 - y1
+        if w * h == 0:
+            return self._get_first_result(bbox, heatmaps, img_idx)
 
+        # ? 放大预测框，尽量可能包含手部
+        w, h = w * self.bbox_factor, h * self.bbox_factor
+        W, H = self.image_size
+        x1, y1 = max(0, int(x - w/2 + 0.5)) , max(0, int(y - h/2 + 0.5)) 
+        x2, y2 = min(W, int(x + w/2 + 0.5)) , min(H, int(y + h/2 + 0.5)) 
+        w, h = x2 - x1, y2 - y1
         img_crop = img[img_idx:img_idx+1, :, y1:y2, x1:x2]  # (1, 3, w, h)
         
-        size = H // self.cd_reduction, W // self.cd_reduction
+        size = _fdiv(H, self.cd_reduction), _fdiv(W, self.cd_reduction)
         # mode 默认为nearest， 其他modes: linear | bilinear | bicubic | trilinear
         img_crop = torch.nn.functional.interpolate(img_crop, size=size) 
         hm_list, _, _ = model(img_crop)
-        
+
         kpt = self.get_pred_kpt(hm_list[-1][:, 3:])  # (1, n_joints, 3)
         kpt[:, :, :2] *= self.feature_stride.to(kpt.device)
         kpt[:, :, :2] *= torch.tensor([w / size[1], h / size[0]], device=kpt.device)
@@ -363,7 +369,7 @@ class ResultParser:
         ap50, ap = count_ap(pred_boxes=pred_bboxes, gt_boxes=gt_bboxes, iou_threshold=iou_thr)
         return ap50, ap
 
-    def evaluate_pck(self, pred_kpts, gt_kpts, thr=0.2):
+    def evaluate_pck(self, pred_kpts, gt_kpts, bboxes, thr=0.2):
         """计算多手PCK， 
         1、先看预测的目标点中心点与真值点中心点的距离来匹配识别目标。
         2、分别对识别出的目标计算PCK
@@ -371,6 +377,7 @@ class ResultParser:
         Args:
             pred_kpts (tensor): 预测的关键点  [batch, max_num_bbox, n_joints, 3], (x, y, score)
             gt_kpts (tensor): 真值关键点  [batch, max_num_bbox, n_joints, 3], (x, y, vis)
+            bboxes (tensor): 真值关键点  [batch, n_hand, 4], (cx, cy, w, h)
         """
         def get_center(kpts):
                 # kpts.shape = (max_num_bbox, n_joints, 3)
@@ -380,34 +387,26 @@ class ResultParser:
                 center_xy = kpts[:,:,:2].sum(dim=1) / num_vis_joints  # (num_object, 2)
                 return center_xy, num_object, num_vis_joints
         
-        def get_pck(pred, gt):
+        def get_pck(pred, gt, wh):
             # 只计算可见点
             gt_vis = gt[gt[:,2] > 0]
             pred_vis = pred[gt[:,2] > 0]
-            
-            # 计算bbox的w,h
-            (x1, y1), _ = gt_vis[:, :2].min(dim=0)
-            (x2, y2), _ = gt_vis[:, :2].max(dim=0)
-            w, h = np.array([x2 - x1, y2 - y1]) * self.bbox_alpha
-            
-            pck = torch.sum(torch.norm(gt_vis-pred_vis,p=2, dim=1) / max(w, h) < thr) / gt_vis.shape[0]
+
+            # 计算bbox的w,h      
+            pck = torch.sum(torch.norm(gt_vis-pred_vis,p=2, dim=1) / torch.max(wh) < thr) / gt_vis.shape[0]
             return pck.item()
             
         pck_list = []
-        for _pred_kpts, _gt_kpts in zip(pred_kpts, gt_kpts):
-            center_gt, num_gt, num_vis_joints_gt = get_center(_gt_kpts)
-            center_pred, num_pred, num_vis_joints_pred = get_center(_pred_kpts)
+        for _pred_kpts, _gt_kpts, bbox in zip(pred_kpts, gt_kpts, bboxes):
+            center_pred, num_pred, num_vis_joints_pred = get_center(_pred_kpts)        
+            _pred_kpts = _pred_kpts[:num_pred]  # 去除冗余占位部分
             
-            # 去除冗余占位部分
-            _gt_kpts = _gt_kpts[:num_gt]    
-            _pred_kpts = _pred_kpts[:num_pred]
-            
-            for center, pred in zip(center_pred, _pred_kpts) :
-                distance = torch.pow(center_gt - center, 2).sum(dim=1)
+            for center, pred in zip(center_pred, _pred_kpts):
+                distance = torch.pow(bbox[:, :2] - center, 2).sum(dim=1)
                 min_idx = distance.argmin()
                 gt = _gt_kpts[min_idx]
                 
-                pck = get_pck(pred, gt)
+                pck = get_pck(pred, gt, bbox[min_idx, :2])
                 pck_list.append(pck)
         
         avg_pck = sum(pck_list) / len(pck_list) if len(pck_list) != 0 else 0

@@ -22,7 +22,7 @@ from utils.transforms import affine_transform
 from utils.transforms import fliplr_joints
 from data.handset.dataset_function import *
 
-from config.config import pcfg, config_dict as cfg
+from config import pcfg, config_dict as cfg
 
 logger = logging.getLogger(__name__)
 

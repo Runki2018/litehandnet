@@ -11,9 +11,9 @@ print(sys.path)
 from utils.evaluation import evaluate_pck, evaluate_ap, get_coordinates_from_heatmap
 from utils.training_kits import stdout_to_tqdm, load_pretrained_state
 
-from models.hourglass_SA import HourglassNet_SA as Network
+from models.pose_hg_ms_att import MultiScaleAttentionHourglass as Network
 from data import get_dataset
-from config.config import DATASET, config_dict
+from config import DATASET, config_dict
 from utils.visualization_tools import draw_heatmaps, draw_region_maps, draw_point, draw_bbox, draw_text
 
 

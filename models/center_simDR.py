@@ -2,7 +2,7 @@ from re import S
 import torch
 from torch import nn
 from utils.training_kits import load_pretrained_state
-from config.config import config_dict as cfg
+from config import config_dict as cfg
 from models.attention import Flatten, SELayer, NAM_Channel_Att
 from models.layers import DWConv, SplitDWConv
 from einops import rearrange, repeat

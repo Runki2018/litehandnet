@@ -4,7 +4,7 @@ import json
 from torch.utils.data import DataLoader, Dataset
 from data.handset.dataset_function import *
 from utils.data_augmentation import adjust_gamma, adjust_sigmoid, homography, horizontal_flip
-from config.config import config_dict
+from config import config_dict
 
 
 class ZHhandCrop(Dataset):

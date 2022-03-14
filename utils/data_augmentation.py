@@ -41,19 +41,22 @@ def adjust_sigmoid(img, prob=0.5):
     return img
 
 
-def homography(img, keypoints, prob=0.5):
+def homography(img, keypoints, prob=0.5, bbox=None):
     """
     include the scale, rotate and perspective, so the position of keypoints will be changed
     :param img: cv2 image, (h,w,c)
     :param keypoints: the coordinates of keypoints ->
             [[[x1,y1,1], ...,[x21,y1,1]],
              [[x1,y1,1], ...,[x21,y1,1]],
-             ...], (batch, 21,3)
+             ...], (n_hand, 21,3)
     :param prob: the probability of homography
     """
 
     if np.random.rand() < prob:
-        return img, keypoints
+        if bbox is None:
+            return img, keypoints
+        else:
+            return img, keypoints, bbox
 
     h, w, _ = img.shape
     src = np.array([[0, 0], [w - 1, 0], [0, h - 1], [w - 1, h - 1]])
@@ -78,10 +81,33 @@ def homography(img, keypoints, prob=0.5):
     # recount the keypoints:
     keypoints_out = keypoints.dot(h.T)
 
-    return img_out, keypoints_out
+    if bbox is None:
+        return img_out, keypoints_out
+    else:
+        bbox = _affine_bbox(bbox, h)
+        return img_out, keypoints_out, bbox
 
+def _affine_bbox(bbox, mat):
+        bbox = np.array(bbox)  # [num_people, 4]
+        num_people = len(bbox)
+        x1y1 = bbox[:, :2] - bbox[:, 2:] / 2
+        x1y2 = bbox[:, :2] + np.concatenate([-1*bbox[:, 2:3], bbox[:,3:4]], axis=1) / 2
+        x2y1 = bbox[:, :2] + np.concatenate([bbox[:, 2:3], -1*bbox[:,3:4]], axis=1) / 2
+        x2y2 = bbox[:, :2] + bbox[:, 2:] / 2
+        
+        vertex = np.concatenate([x1y1, x1y2, x2y1, x2y2], axis=0)
+        vertex = np.concatenate([vertex, vertex[:, 0:1]*0+1], axis=1)   # 3 tuple vector
+        vertex = np.dot(vertex, mat.T)
+        
+        vertex = vertex[:, :2].reshape((num_people, 4, 2))
+        tl = np.min(vertex, axis=1)  # top-left-vertex
+        br = np.max(vertex, axis=1)  # bottom-right-vertex
+        
+        bbox[:, :2] = (tl + br) / 2
+        bbox[:, 2:] = br - tl
+        return bbox
 
-def horizontal_flip(img, keypoints, prob=0.5):
+def horizontal_flip(img, keypoints, prob=0.5, bbox=None):
     """
     :param img: cv2 image, (h,w,c)
     :param keypoints: the coordinates of keypoints ->  (batch, 21 3)
@@ -92,7 +118,12 @@ def horizontal_flip(img, keypoints, prob=0.5):
         img = cv2.flip(img, 1)  # img flip
         _, w, _ = img.shape
         keypoints[..., 0] = w - 1 - keypoints[..., 0]  # (batch, 21, 3),[x,y,1], keypoints flip
-    return img, keypoints
+        if bbox is not None:
+            bbox[:, 0] = w - 1 - bbox[:, 0]
+    if bbox is None:
+        return img, keypoints
+    else:
+        return img, keypoints, bbox
 
 
 def central_scale(img, keypoints, resolution=(256, 256), prob=0.5):

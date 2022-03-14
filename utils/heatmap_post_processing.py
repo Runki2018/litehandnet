@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 import cv2
-from config.config import pcfg
+from config import pcfg
 
 def adjust_keypoints_by_offset(keypoints, heatmaps):
         """

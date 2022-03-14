@@ -21,7 +21,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 
 from utils.training_kits import set_seeds
-from config.config import seed, DATASET, config_dict as cfg
+from config import seed, DATASET, config_dict as cfg
 
 # set_seeds(seed)  # 多卡训练随机数种子不能相同，否则数据增广单一
 

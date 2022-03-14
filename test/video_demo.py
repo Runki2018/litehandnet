@@ -11,7 +11,7 @@ from utils.visualization_tools import *
 from utils.SPheatmapParser import HeatmapParser_SH
 from models.RKNet_SPP import RegionKeypointNetwork as Network
 from utils.training_kits import load_pretrained_state
-from config.config import  config_dict as cfg
+from config import  config_dict as cfg
 import argparse
 from torchvision import transforms
 

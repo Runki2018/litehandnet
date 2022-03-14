@@ -8,14 +8,14 @@ from utils.CenterSimDRParser import ResultParser
 from utils.evaluation import evaluate_pck, evaluate_ap
 
 # from models.center_simDR import LiteHourglassNet as Network
-from models.hourglass_SA import HourglassNet_SA as Network
+from models.pose_hg_ms_att import MultiScaleAttentionHourglass as Network
 # from models.LiteHourglass import LiteHourglass as Network
 
-from loss.loss import HMSimDRLoss as Loss
+from loss.loss import MultiTaskLoss as Loss
 
 from train.distributed_utils import init_distributed_mode, dist, cleanup, reduce_value, reduce_value
 from utils.training_kits import stdout_to_tqdm, load_pretrained_state
-from config.config import config_dict as cfg
+from config import config_dict as cfg
 import os
 from data import get_dataset
 
@@ -202,7 +202,7 @@ class Main:
             
             # 开始循环训练
             if np.random.rand(1) > 0.4:
-                img_crop, target_x, target_y, kpts_hm, _ = self.train_set.generate_cd_gt(img, gt_kpts, bbox, target_weight)
+                img_crop, target_x, target_y, kpts_hm, _ = self.train_set.generate_cd_gt(img, gt_kpts, bbox)
                 hm, pred_x, pred_y = self.model(img_crop)
                 loss, loss_dict = self.criterion(hm, kpts_hm, 
                                     pred_x, pred_y, target_x, target_y, target_weight)
@@ -251,40 +251,34 @@ class Main:
                     meta = [gt.to(self.device) for gt in meta]
                     img, target_x, target_y, target_weight, kpts_hm, bbox, gt_kpts = meta
                     hm, pred_x, pred_y = self.model(img)
-                    # hm, pred_x, pred_y = [kpts_hm], target_x, target_y
                     
                     # 结果解析1，得到原图关键点和边界框
-                    pred_bboxes = self.result_parser.get_pred_bbox(hm[-1][:, :3])
+                    pred_bboxes = self.result_parser.get_pred_bbox(hm[-1][:, -3:])
                     
-                    pred_kpts = self.result_parser.get_group_keypoints(self.model, img, pred_bboxes, hm[-1][:, 3:])
+                    pred_kpts = self.result_parser.get_group_keypoints(self.model, img, pred_bboxes, hm[-1][:, :-3])
                     
                     ap50, ap, _ = evaluate_ap(hm[-1][:, :3], bbox)
                     ap50_list.append(ap50* img.shape[0])
                     ap_list.append(ap* img.shape[0])
                     
-                    # vector2kpt = self.result_parser.get_coordinates_from_vectors(pred_x, pred_y, pred_bboxes) 
-                    # avg_xy_pck = self.result_parser.evaluate_pck(vector2kpt, gt_kpts, thr=cfg['pck_thr'])         
-                    # xy_pck.append(avg_xy_pck * img.shape[0]) 
-                    
                     for i in range(self.n_out):
-                        avg_hm_pck = evaluate_pck(hm[i][:, 3:], kpts_hm[:, 3:], bbox, target_weight, cfg['pck_thr']).item()       
+                        avg_hm_pck = evaluate_pck(hm[i][:, :-3], kpts_hm[:, :-3], bbox, target_weight, cfg['pck_thr']).item()       
                         hm_pck[i] += avg_hm_pck * img.shape[0]
                         
-                    coor_pck += self.result_parser.evaluate_pck(pred_kpts.to(gt_kpts.device), gt_kpts, cfg['pck_thr']) * img.shape[0]
+                    coor_pck += self.result_parser.evaluate_pck(pred_kpts.to(gt_kpts.device), gt_kpts, bbox, cfg['pck_thr']) * img.shape[0]
                     
                 # 记录训练数据     
-                # PCK_vector = sum(xy_pck) / self.test_set.__len__() * 100
                 PCK_hm = [p / self.test_set.__len__() * 100 for p in hm_pck]
-                
+                coor_pck = coor_pck / self.test_set.__len__() * 100
                 ap_final = sum(ap_list) / self.test_set.__len__() * 100
                 ap50_final = sum(ap50_list) / self.test_set.__len__() *100
                 print(f"AP = {ap_final}\nAP50 = {ap50_final}")
                 for i, pck in enumerate(PCK_hm):
                     print(f"{i=}\t{pck=}")
-                print(f"Coordinate PCK = {coor_pck / self.test_set.__len__() *100}")
+                print(f"Coordinate PCK = {coor_pck}")
 
                 # 记录训练数据
-                self.save_dict["mPCK"].append(PCK_hm[-1])
+                self.save_dict["mPCK"].append(coor_pck)
                 self.save_dict["ap"].append(ap_final)
                 self.writer.add_scalars('mPCK', {f"pck_{i}": v for i, v in enumerate(PCK_hm)}, self.epoch)
                 self.writer.add_scalars('AP', {"AP50": ap50_final, "AP": ap_final}, self.epoch)
@@ -293,10 +287,10 @@ class Main:
                     for i in range(-1, -4, -1):
                         print("pck{} = {:.3f}".format(i, self.save_dict["mPCK"][i]), end="\t")
                 else:
-                    print("pck_hm = {:.3f}".format(PCK_hm[-1]))
+                    print("coor_pck = {:.3f}".format(coor_pck))
 
-                if PCK_hm[-1] > self.best_mPCK:
-                    self.best_mPCK = PCK_hm[-1]
+                if coor_pck > self.best_mPCK:
+                    self.best_mPCK = coor_pck
                     self.save_model(best_pck=True)
 
                 if ap_final > self.best_ap:
@@ -344,7 +338,7 @@ class Main:
                 self.epoch = epoch
 
                 self.train_sampler.set_epoch(epoch)
-                # self.train()
+                self.train()
                 if (epoch % cfg['eval_interval']) == 0:
                     self.test()
             if self.rank == 0:

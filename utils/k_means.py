@@ -1,7 +1,7 @@
 import numpy as np
-from config.config import config_dict
+from config import config_dict
 from data import get_dataset
-from config.config import DATASET
+from config import DATASET
 
 
 def _k_means(relative_sizes):

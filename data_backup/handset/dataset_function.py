@@ -1,5 +1,5 @@
 import numpy as np
-from config.config import DATASET, config_dict as cfg
+from config import DATASET, config_dict as cfg
 
 image_size = cfg["image_size"]
 thr_list = DATASET["thr_list"]

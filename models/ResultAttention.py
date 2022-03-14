@@ -5,7 +5,7 @@ from models.layers import Conv, Residual, Hourglass, BasicBlock, ConvBNReLu, SPP
 from models.hourglass import HourglassNet, Residual, Residual_SA
 from models.attention import StageChannelAttention_fc, StageChannelAttention_all
 from models.region_layer import SizeBlock, RegionBlock
-from config.config import config_dict as cfg
+from config import config_dict as cfg
 
 torch.backends.cudnn.benchmark = True
 

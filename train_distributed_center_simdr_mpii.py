@@ -12,12 +12,12 @@ from utils.transforms import get_final_preds
 from utils.evaluation import evaluate_pck, evaluate_ap
 # from models.ResultAttention import RANet as Network
 # from models.hourglass import HourglassNet as Network
-from models.hourglass_SA import HourglassNet_SA as Network
+from models.pose_hg_ms_att import MultiScaleAttentionHourglass as Network
 # from models.lite_hrnet import LiteHRNet as Network
 from loss.loss import HMLoss as Loss
 from train.distributed_utils import init_distributed_mode, dist, cleanup, reduce_value, reduce_value
 from utils.training_kits import stdout_to_tqdm, load_pretrained_state
-from config.config import config_dict as cfg
+from config import config_dict as cfg
 import os
 from data import get_dataset
 

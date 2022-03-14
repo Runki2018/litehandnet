@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torchvision
 from utils.bbox_metric import xywh2xyxy, box_iou, bbox_iou
-from config.config import pcfg, config_dict as cfg
+from config import pcfg, config_dict as cfg
 
 image_size = cfg["image_size"]
 heatmap_sigma = cfg["hm_sigma"][0]
@@ -13,7 +13,7 @@ heatmap_sigma = cfg["hm_sigma"][0]
 #     def get_bbox(kpts):
 
 
-def evaluate_pck(pred_keypoints_hm, gt_keypoints_hm, bbox, target_weight=None, thr=0.2, hm_type="gaussian"):
+def evaluate_pck(pred_keypoints_hm, gt_keypoints_hm, bbox, target_weight=None, thr=0.2):
     """
     Calculate accuracy according to PCK,
     but uses ground truth heatmap rather than y,x locations
@@ -33,38 +33,34 @@ def evaluate_pck(pred_keypoints_hm, gt_keypoints_hm, bbox, target_weight=None, t
     batch, n_joints, h, w = pred_keypoints_hm.shape
     gt_keypoints_hm = gt_keypoints_hm.to(pred_keypoints_hm.device)
 
-    if hm_type == "gaussian":
-        pred_coors, _ = get_coordinates_from_heatmap(pred_keypoints_hm)  # (batch, n_joints,xy)
-        target_coors, _ = get_coordinates_from_heatmap(gt_keypoints_hm)
+    pred_coors, _ = get_coordinates_from_heatmap(pred_keypoints_hm)  # (batch, n_joints,xy)
+    target_coors, _ = get_coordinates_from_heatmap(gt_keypoints_hm)
 
-        # mapping to original image size
-        factor = (torch.tensor(image_size) / torch.tensor([w, h])).to(pred_coors.device)
-        pred_coors *= factor
-        target_coors *= factor
-         # todo: check the value of mPCK
-        max_wh, _ = bbox[:, 2:].max(dim=-1)  # (batch,), (batch,)
-        max_wh = max_wh.to(pred_keypoints_hm.device)
+    # mapping to original image size
+    factor = (torch.tensor(image_size) / torch.tensor([w, h])).to(pred_coors.device)
+    pred_coors *= factor
+    target_coors *= factor
+        # todo: check the value of mPCK
+    max_wh, _ = bbox[:, 2:].max(dim=-1)  # (batch,), (batch,)
+    max_wh = max_wh.to(pred_keypoints_hm.device)
 
-        if target_weight is None:
-            target_weight = torch.ones_like(pred_coors)
-        else:
-            target_weight = torch.cat([target_weight, target_weight], dim=-1)
-        target_weight = target_weight.to(pred_coors.device)
-
-        pck = []
-        for i in range(pred_coors.shape[0]):
-            pred = pred_coors[i][target_weight[i] == 1].view(-1, 2)  # (n_visable_joints, xy)
-            target = target_coors[i][target_weight[i] == 1].view(-1, 2) 
-    
-            distance = torch.norm(pred - target, dim=-1) / max_wh[i]
-
-            num_lt_thr = distance < thr  # num_lt_thr.shape = (batch, n_joints)
-            PCK = num_lt_thr.sum() / target_weight[i].sum() * 2
-            pck.append(PCK.item())
-        mPCK = np.mean(pck)
-
+    if target_weight is None:
+        target_weight = torch.ones_like(pred_coors)
     else:
-        raise NotImplementedError
+        target_weight = torch.cat([target_weight, target_weight], dim=-1)
+    target_weight = target_weight.to(pred_coors.device)
+
+    pck = []
+    for i in range(pred_coors.shape[0]):
+        pred = pred_coors[i][target_weight[i] == 1].view(-1, 2)  # (n_visable_joints, xy)
+        target = target_coors[i][target_weight[i] == 1].view(-1, 2) 
+
+        distance = torch.norm(pred - target, dim=-1) / max_wh[i]
+
+        num_lt_thr = distance < thr  # num_lt_thr.shape = (batch, n_joints)
+        PCK = num_lt_thr.sum() / target_weight[i].sum() * 2
+        pck.append(PCK.item())
+    mPCK = np.mean(pck)
 
     return mPCK
 
