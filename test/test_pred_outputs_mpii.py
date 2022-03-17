@@ -25,7 +25,7 @@ class TestPreds:
     def __init__(self, checkpoint="", is_cuda=True, ground_truth=False):
 
         print("preparing data...")
-        self.dataset, self.test_loader = get_dataset(set_type='test')
+        self.dataset, self.test_loader = get_dataset(is_train='test')
         print("done!")
 
         self.batch_size = cfg['batch_size']

@@ -4,7 +4,7 @@ import torch.optim as optim
 import numpy as np
 from tqdm import tqdm
 from datetime import datetime
-from utils.CenterSimDRParser import ResultParser
+from utils.result_parser import ResultParser
 from utils.evaluation import evaluate_pck, evaluate_ap
 
 # from models.center_simDR import LiteHourglassNet as Network

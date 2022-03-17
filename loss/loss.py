@@ -58,16 +58,16 @@ class MultiTaskLoss(nn.Module):
                 ]
             )
         
-        self.simdr_loss = KLDiscretLoss() if cfg['simdr_split_ratio'] else None
+        self.simdr_loss = KLDiscretLoss() if self.with_simdr else None
         
-        self.auto_weights = cfg['auto_weights']
-        if self.auto_weights:
+        self.auto_weight = cfg['auto_weight']
+        if self.auto_weight:
             params = torch.ones(cfg['num_loss'], requires_grad=True)
             self.p = nn.Parameter(params, requires_grad=True)   # TODO:将这个参数也放入优化器的参数优化列表中
         
     def forward(self, outputs, targets, target_weight, cycle_train=False, 
                 output_x=None, output_y=None, target_x=None, target_y=None):
-        self._forward_check(self, outputs, targets)
+        self._forward_check(outputs, targets, cycle_train)
 
         loss_dict = defaultdict(list)
         if cycle_train:
@@ -84,10 +84,10 @@ class MultiTaskLoss(nn.Module):
             loss_dict[k] = sum(v)
         
         loss_sum = 0    
-        if self.auto_weights:
-            for idx, loss_idx in enumerate(loss_dict.values()):
+        if self.auto_weight:
+            for idx, loss in enumerate(loss_dict.values()):
                 c2 = self.p[idx] ** 2  # 正则项平方非负，后面再用log(1+c2)，使c2接近0
-                loss_sum = loss_sum + 0.5 / c2 * loss_idx + torch.log(1 + c2)
+                loss_sum = loss_sum + 0.5 / c2 * loss + torch.log(1 + c2)
         else:
             loss_sum = sum([l for l in loss_dict.values()])
         
@@ -112,9 +112,12 @@ class MultiTaskLoss(nn.Module):
     
     def _forward_check(self, outputs, targets, cycle_train=False):
         def _check(a, b):
-            assert isinstance(a, (tuple, list, nn.ModuleList)), "{} should be a tuple or list !!!".format(a)
-            assert isinstance(b, (tuple, list, nn.ModuleList)), "{} should be  tuple or list !!!".format(b)
-            assert len(a) == len(b), "The length is not equal !!!, {} <> {}".format(a, b)
+            assert isinstance(a, (tuple, list, nn.ModuleList)), \
+            "cd: {} | want a tuple or list, but get {}!!!".format(cycle_train,type(a))
+            assert isinstance(b, (tuple, list, nn.ModuleList)), \
+            "cd: {} | want a tuple or list, but get {}!!!".format(cycle_train, type(b))
+            assert len(a) == len(b), \
+            "cd: {} |The length is not equal !!!, {} <> {}".format(cycle_train, len(a), len(b))
 
         _check(outputs, targets)
         _check(outputs, self.losses['hm'])

@@ -76,10 +76,10 @@ def clip_coords(boxes, img_shape):
 def bbox_iou(box1, box2, x1y1x2y2=True, GIoU=False, DIoU=False, CIoU=False):
     """
         计算一个边界框box1,对若干边界框box2的IOU
-    :param box1: [4], x1y1x2y2 or xywh
-    :param box2: （torch）， n_hand*4, x1y1x2y2 or xywh
+    :param box1: [4,], x1y1x2y2 or xywh
+    :param box2: (torch), [n_hand, 4], x1y1x2y2 or xywh
     :param x1y1x2y2:  确定 bbox的格式
-    :param GIoU:  bool， if True, return GIOU of box1 to box2
+    :param GIoU:  bool, if True, return GIOU of box1 to box2
     :param DIoU:  bool
     :param CIoU: bool
     :return: iou, shape = n_hand_gt

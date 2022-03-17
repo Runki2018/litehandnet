@@ -19,7 +19,7 @@ def init_distributed_mode(args):
         return
 
     args.distributed = True
-    
+      
     # 设置不同的随机数种子，防止多卡数据增广的同态性，从而间隙性能
     set_seeds(seed=1+args.rank, cuda_deterministic=False)
 
@@ -30,6 +30,7 @@ def init_distributed_mode(args):
     dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
                             world_size=args.world_size, rank=args.rank)
     dist.barrier()  # 阻塞，等待所有GPU处理完上面一步
+    
 
 def cleanup():
     dist.destroy_process_group()  # 训练完成后记得销毁进程组释放资源

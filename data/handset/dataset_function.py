@@ -1,9 +1,5 @@
 import numpy as np
 import torch
-from config import config_dict as cfg
-
-image_size = cfg["image_size"]
-
 
 def validate_label(keypoints: list, size: tuple):
     """
@@ -26,33 +22,39 @@ def validate_label(keypoints: list, size: tuple):
 
 def validate_keypoints(keypoints, img_size=(256, 256), n_joints=21):
     """
-     验证关键点是否可见，如果变换后的关键点超出图像边界，则将vis设置为-1
-    :param keypoints: np.ndarray (1, 21, 3)， （x, y , vis）
+     验证关键点是否可见,如果变换后的关键点超出图像边界,则将vis设置为-1
+    :param keypoints: np.ndarray (n_obj, 21, 3),(x, y , vis) or (21, 3)
     :param img_size: the size of image
     :param n_joints: the number of keypoints
     :return: keypoints
     """
     if keypoints.ndim == 3:
-        keypoints = keypoints[0]  # (21, 3)
-    n, xys = keypoints.shape
-    if n != n_joints:
-        raise ValueError(f"{n_joints=} != 21")
-
+        assert keypoints.shape[1] == n_joints, \
+            "keypoints.shape[1] is {} <> {}".format(keypoints.shape[1], n_joints)
+    elif keypoints.ndim == 2:
+        assert keypoints.shape[0] == n_joints, \
+            "keypoints.shape[0] is {} <> {}".format(keypoints.shape[1], n_joints)
+    else:
+        raise ValueError("shape {}".format(keypoints.shape))
+    
     w, h = img_size
-    for i in range(n_joints):
-        x, y = keypoints[i, :2]
-        if x > w - 1 or y > h - 1 or x < 0 or y < 0:
-            keypoints[i, 2] = -1  # visible flag
-    return keypoints[None]  # (1, 21, 3)
+    mask = np.zeros_like(keypoints, dtype=np.bool8)
+    mask[keypoints[..., 0] < 0] = True
+    mask[keypoints[..., 1] < 0] = True
+    mask[keypoints[..., 0] > w - 1] = True
+    mask[keypoints[..., 1] > h - 1] = True
+    
+    keypoints[mask] = -1  # visible flag
+    return keypoints
 
 
-def generate_multi_heatmaps(batch_joints, heatmap_size: int, joints_weight, heatmap_sigma=None, img_size=None):
+def generate_multi_heatmaps(batch_joints, img_size, heatmap_size, heatmap_sigma, joints_weight=None):
     """
         用于生成一张图片上有多只手的真值热图
         我移除了joints_vis， 因为可见性一直为1
         :param batch_joints:  [batch, nof_joints, 2 or 3]
-        :param heatmap_size:  int, such as 88
-        :param heatmap_sigma:  default 3
+        :param heatmap_size:  int, such as 64
+        :param heatmap_sigma:  default 2
         :param joints_weight: 关键点权重，决定一个关键点的重要性，如果不可见则为0
         :param img_size: (int or None) 输入图像的大小
         :return: target, target_weight(1: visible, 0: invisible)
@@ -67,7 +69,6 @@ def generate_multi_heatmaps(batch_joints, heatmap_size: int, joints_weight, heat
             vis = vis.clone().cpu().numpy()
         target_weight[vis] = 0
 
-    img_size = image_size[0] if img_size is None else img_size
     feat_stride = img_size / heatmap_size
     for idx in range(n_hand):
         joints = batch_joints[idx]
@@ -106,13 +107,13 @@ def generate_multi_heatmaps(batch_joints, heatmap_size: int, joints_weight, heat
                 target[idx, joint_id][img_y[0]:img_y[1], img_x[0]:img_x[1]] = \
                     g[g_y[0]:g_y[1], g_x[0]:g_x[1]]
 
-        if cfg['use_different_joints_weight']:    
+        if joints_weight is not None:    
             target_weight = np.multiply(target_weight, joints_weight)
 
     return target, target_weight
 
 
-def get_bbox(keypoints, alpha=1.3):
+def get_bbox(keypoints, img_size=(256, 256), alpha=1.3):
     """ 根据关键点获取边界框，alpha是将仅仅贴合关键点的框放大的倍数
 
     Args:
@@ -138,7 +139,7 @@ def get_bbox(keypoints, alpha=1.3):
         x1, y1 = x1y1
         x2, y2 = x2y2
         x1, y1 = max(0, x1), max(0, y1)
-        x2, y2 = min(image_size[0], x2), min(image_size[1], y2)
+        x2, y2 = min(img_size[0], x2), min(img_size[1], y2)
         
         cx = (x1 + x2) / 2  # the center of bbox
         cy = (y1 + y2) / 2
@@ -148,7 +149,7 @@ def get_bbox(keypoints, alpha=1.3):
         bbox[i_hand] = np.array([cx, cy, w, h], np.int16)
     return bbox
 
-def get_multi_regions(bbox, heatmap_size, heatmap_sigma=None, img_size=None):
+def get_multi_regions(bbox, img_size, heatmap_size, heatmap_sigma):
     """
 
     :param bbox: ndarray (n_hand, 4), (cx, cy, w, h)
@@ -167,15 +168,18 @@ def get_multi_regions(bbox, heatmap_size, heatmap_sigma=None, img_size=None):
         c = bbox[i_hand, :2]
         s = bbox[i_hand, 2:]
 
-        temp_regions, _ = generate_multi_heatmaps(c.reshape((1, 1, 2)), heatmap_size, region_weights, heatmap_sigma=heatmap_sigma, img_size=img_size)
+        temp_regions, _ = generate_multi_heatmaps(c.reshape((1, 1, 2)),
+                                                  img_size,
+                                                  heatmap_size,
+                                                  heatmap_sigma)
 
         multi_hand_regions[i_hand, 0] = temp_regions[0]
-        multi_hand_regions[i_hand, 1:] = get_hw_region_map(c, s, heatmap_size, heatmap_sigma, image_size[0] if img_size is None else img_size)
+        multi_hand_regions[i_hand, 1:] = get_hw_region_map(c, s, img_size, heatmap_size, heatmap_sigma)
 
     return multi_hand_regions
 
 
-def get_hw_region_map(c, s, heatmap_size, heatmap_sigma, img_size):
+def get_hw_region_map(c, s, img_size, heatmap_size, heatmap_sigma):
     """
     :param c: the center point of bbox, ndarray([cx, cy])
     :param s: ndarray([w_box,h_box])

@@ -4,16 +4,10 @@ import numpy as np
 import torch
 import torchvision
 from utils.bbox_metric import xywh2xyxy, box_iou, bbox_iou
-from config import pcfg, config_dict as cfg
-
-image_size = cfg["image_size"]
-heatmap_sigma = cfg["hm_sigma"][0]
-
-# def evaluate_pck_by_coors(pred_kpts, gt_kpts, thr=0.2):
-#     def get_bbox(kpts):
+from config import pcfg
 
 
-def evaluate_pck(pred_keypoints_hm, gt_keypoints_hm, bbox, target_weight=None, thr=0.2):
+def evaluate_pck(pred_keypoints_hm, gt_keypoints_hm, bbox, image_size=256, target_weight=None, thr=0.2):
     """
     Calculate accuracy according to PCK,
     but uses ground truth heatmap rather than y,x locations
@@ -97,7 +91,7 @@ def get_coordinates_from_heatmap(batch_heatmaps):
 
 # ----------------- region maps 和 计算bbox AP相关 -----------------
 
-def cs_from_region_map(batch_region_maps, k=2000, thr=0.8):
+def cs_from_region_map(batch_region_maps, image_size=256, k=20, thr=0.8):
     """
         根据置信度选出大于阈值的k个目标候选框。
     :param thr: 置信度阈值，大于该阈值的候选框点，才会计算bbox，不然为[0，0，0，0]
@@ -113,7 +107,7 @@ def cs_from_region_map(batch_region_maps, k=2000, thr=0.8):
     wh_region_maps = batch_region_maps[:, 1:]  # (batch, 2, h, w)
     # print(f"{c_region_maps.shape=}")
     # print(f"{wh_region_maps.shape=}")
-
+    
     candidates = torch.zeros((batch, k, 5), dtype=torch.float32)
 
     # get center
@@ -128,20 +122,20 @@ def cs_from_region_map(batch_region_maps, k=2000, thr=0.8):
                 # print(f"{center=}")
                 candidates[bi, ki, 0] = center[0]  # column, x in heatmap
                 candidates[bi, ki, 1] = center[1]  # row, y in heatmap
-                s = _get_wh(wh_region_maps, bi, center)
+                s = _get_wh(wh_region_maps, bi, center, image_size)
                 candidates[bi, ki, 2] = s[0]
                 candidates[bi, ki, 3] = s[1]
 
     candidates[..., 4] = top_val  # 记录confidence
 
     # scale center x and y from heatmap to original image
-    up_stride = image_size[0] / heatmap_size
+    up_stride = image_size / heatmap_size
     candidates[..., :2] *= up_stride
 
     return candidates
 
 
-def _get_wh(wh_region_maps, bi, center):
+def _get_wh(wh_region_maps, bi, center, image_size, heatmap_sigma=2):
     # get width and height of bbox
     center = torch.tensor(center)
     heatmap_size = wh_region_maps.shape[-1]
@@ -161,7 +155,7 @@ def _get_wh(wh_region_maps, bi, center):
     gamma_y = wh_region_maps[bi, 1, y1:y2, x1:x2].flatten().mean(dim=-1)
     gamma_x = torch.clip(gamma_x, 0, 1)  # 0 <= x <= 1
     gamma_y = torch.clip(gamma_y, 0, 1)  # 0 <= y <= 1
-    w, h = image_size
+    w = h = image_size  # ! only fit the condition of same size
     s_x = gamma_x * w
     s_y = gamma_y * h
     return s_x, s_y
@@ -215,8 +209,7 @@ def non_max_suppression(prediction, iou_threshold=0.8, conf_threshold=0.8, max_n
     return output
 
 
-def evaluate_ap(batch_region_maps, gt_boxes, k=200, conf_thr=0.3,
-                nms_thr=0.5, max_num=100, iou_thr=None):
+def evaluate_ap(batch_region_maps, gt_boxes, image_size, k=20, iou_thr=None):
     """
         输出经过非最大值抑制后的预测框和 ap。
 
@@ -229,7 +222,7 @@ def evaluate_ap(batch_region_maps, gt_boxes, k=200, conf_thr=0.3,
     :return: AP and a list of predicted bboxes, [lx, ly, w, h, conf]
     """
 
-    candidates = cs_from_region_map(batch_region_maps, k, pcfg['detection_threshold'])
+    candidates = cs_from_region_map(batch_region_maps, image_size, k, pcfg['detection_threshold'])
     # print(f"{candidates[:20]=}")
     pred_bboxes = non_max_suppression(candidates, pcfg["iou_threshold"],
                                       pcfg['detection_threshold'], pcfg["max_num_bbox"])
@@ -341,40 +334,3 @@ def count_ap(pred_boxes: list, gt_boxes: list, iou_threshold=None, verbose=False
     AP50, AP = ap[0], np.mean(ap)   # 这个地方只有iou_threshold=None才有意义，且AP50, AP75, AP95等都会被计算
     return AP50, AP
 
-
-if __name__ == '__main__':
-    # region_test = torch.zeros((2, 3, 20, 20))
-    # region_test[:, 0, 4, 4] = 1
-    # region_test[:, 0, 5, 5] = 0.88
-    # region_test[:, 0, 6, 6] = 0.91
-    # region_test[:, 1:] = 0.6
-    # results = cs_from_region_map(region_test, k=10)
-    # print(f"{region_test=}")
-    # print(f"{results=}")
-    #
-    # out_nms = non_max_suppression(results)
-    # print(f"{out_nms=}")
-    #
-    # out_nms = evaluate_ap(region_test, k=10)
-    # print(f"{out_nms=}")
-
-    pbox = [
-        [
-            [30, 40, 40, 40, 0.91], [61, 145, 83, 130, 0.61], [30, 45, 40, 40, 0.91]
-        ],
-        [
-            [150, 60, 200, 100, 0.8], [70, 40, 110, 40, 0.7], [60, 150, 80, 180, 0.4]
-        ],
-    ]
-
-    gbox = [
-        [
-            [60, 150, 80, 180], [30, 40, 40, 40], [30, 30, 50, 40],
-        ],
-        [
-            [70, 40, 110, 40],
-        ],
-    ]
-
-    ap_batch = count_ap(pred_boxes=pbox, gt_boxes=gbox, iou_threshold=None, verbose=True)
-    print(f"{ap_batch=}")
