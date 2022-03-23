@@ -1,10 +1,11 @@
 import torch
 from torch import nn
-from loss.heatmapLoss import RegionLoss, MaskLoss, L2Loss, JointsMSELoss, SmoothL1Loss
-from loss.centernet_simdr_loss import focal_loss, reg_l1_loss, KLDiscretLoss
+from loss.heatmapLoss import RegionLoss, MaskLoss, L2Loss, JointsMSELoss, SmoothL1Loss, KLFocalLoss
+from loss.centernet_simdr_loss import KLDiscretLoss
 from collections import defaultdict
 
 loss_func = {
+    'KL': KLFocalLoss,
     "MaskLoss": MaskLoss,
     "RegionLoss": RegionLoss,
     "MSE": nn.MSELoss,
@@ -23,41 +24,23 @@ class MultiTaskLoss(nn.Module):
         self.with_cycle_detection = cfg['with_cycle_detection']
         self.with_simdr = True if cfg['simdr_split_ratio'] > 0 else False
         
-        self.losses = {}
-        self.losses['hm_factor'] = cfg['hm_loss_factor'] 
-        self.losses['hm'] = nn.ModuleList(
+   
+        self.hm_factor = cfg['hm_loss_factor'] 
+        self.hm_loss = nn.ModuleList(
                 [
                     loss_func[cfg["kpt_loss"]]() if factor > 0 else None
                     for factor in cfg['hm_loss_factor']  
                 ]
             )   
-        self.losses['region_factor'] = cfg['region_loss_factor'] 
-        self.losses['region'] = nn.ModuleList(
+        self.region_factor = cfg['region_loss_factor'] 
+        self.region_loss = nn.ModuleList(
                 [
                     loss_func[cfg["region_loss"]]()
                     if self.with_region_map and factor > 0 else None
                     for factor in cfg['region_loss_factor']  
                 ]
             )
-        
-        # ! 循环检测的损失函数，是否需要分开多个损失函数实例去计算？
-        self.cd_losses = defaultdict(list)
-        self.cd_losses['hm_factor'] = cfg['cd_hm_loss_factor'] 
-        self.cd_losses['hm'] = nn.ModuleList(
-                [
-                    loss_func[cfg["kpt_loss"]]() if factor > 0 else None
-                    for factor in cfg['cd_hm_loss_factor']  
-                ]
-            )   
-        self.cd_losses['region_factor'] = cfg['cd_region_loss_factor'] 
-        self.cd_losses['region'] = nn.ModuleList(
-                [
-                    loss_func[cfg["region_loss"]]()
-                    if self.with_region_map and factor > 0 else None
-                    for factor in cfg['cd_region_loss_factor']  
-                ]
-            )
-        
+    
         self.simdr_loss = KLDiscretLoss() if self.with_simdr else None
         
         self.auto_weight = cfg['auto_weight']
@@ -65,15 +48,12 @@ class MultiTaskLoss(nn.Module):
             params = torch.ones(cfg['num_loss'], requires_grad=True)
             self.p = nn.Parameter(params, requires_grad=True)   # TODO:将这个参数也放入优化器的参数优化列表中
         
-    def forward(self, outputs, targets, target_weight, cycle_train=False, 
+    def forward(self, outputs, targets, target_weight, 
                 output_x=None, output_y=None, target_x=None, target_y=None):
-        self._forward_check(outputs, targets, cycle_train)
+        self._forward_check(outputs, targets)
 
         loss_dict = defaultdict(list)
-        if cycle_train:
-            self._outputs_loss(outputs, targets, target_weight, loss_dict, self.cd_losses)
-        else:
-            self._outputs_loss(outputs, targets, target_weight, loss_dict, self.losses)
+        self._outputs_loss(outputs, targets, target_weight, loss_dict)
 
         if self.with_simdr:
             loss_dict['simdr'].append(
@@ -94,46 +74,39 @@ class MultiTaskLoss(nn.Module):
         loss_dict = {k:v.item() for k, v in loss_dict.items()}
         return loss_sum, loss_dict
     
-    def _outputs_loss(self, outputs, targets, target_weight, loss_dict, loss_fuc):   
+    def _outputs_loss(self, outputs, targets, target_weight, loss_dict):   
         if self.with_region_map:
             for idx, (_pred, _gt) in enumerate(zip(outputs, targets)):
-                if loss_fuc['hm'][idx]:
-                    kpt_loss = loss_fuc['hm'][idx](_pred[:, :-2], _gt[:, :-2], target_weight) 
-                    loss_dict['kpt'].append(kpt_loss * loss_fuc['hm_factor'][idx])
+                if self.hm_loss[idx]:
+                    kpt_loss = self.hm_loss[idx](_pred[:, :-2], _gt[:, :-2], target_weight) 
+                    loss_dict['kpt'].append(kpt_loss * self.hm_factor[idx])
                     
-                if loss_fuc['region'][idx]:
-                    wh_loss =loss_fuc['region'][idx](_pred[:, -2:], _gt[:, -2:])     
-                    loss_dict['wh'].append(wh_loss * loss_fuc['region_factor'][idx])
+                if self.region_loss[idx]:
+                    wh_loss = self.region_loss[idx](_pred[:, -2:], _gt[:, -2:])     
+                    loss_dict['wh'].append(wh_loss * self.region_factor[idx])
         else:
             for idx, (_pred, _gt) in enumerate(zip(outputs, targets)):
-                if loss_fuc['hm'][idx]:
-                    kpt_loss = loss_fuc['hm'][idx](_pred, _gt, target_weight)
-                    loss_dict['kpt'].append(kpt_loss * loss_fuc['hm_factor'][idx])
+                if self.hm_loss[idx]:
+                    kpt_loss = self.hm_loss[idx](_pred, _gt, target_weight)
+                    loss_dict['kpt'].append(kpt_loss * self.hm_factor[idx])
     
-    def _forward_check(self, outputs, targets, cycle_train=False):
+    def _forward_check(self, outputs, targets):
         def _check(a, b):
             assert isinstance(a, (tuple, list, nn.ModuleList)), \
-            "cd: {} | want a tuple or list, but get {}!!!".format(cycle_train,type(a))
+                "want a tuple or list, but get {}!!!".format(type(a))
             assert isinstance(b, (tuple, list, nn.ModuleList)), \
-            "cd: {} | want a tuple or list, but get {}!!!".format(cycle_train, type(b))
+                "want a tuple or list, but get {}!!!".format(type(b))
             assert len(a) == len(b), \
-            "cd: {} |The length is not equal !!!, {} <> {}".format(cycle_train, len(a), len(b))
+                "The length is not equal !!!, {} <> {}".format(len(a), len(b))
 
         _check(outputs, targets)
-        _check(outputs, self.losses['hm'])
-        _check(self.losses['hm'], self.losses['hm_factor'])
+        _check(outputs, self.hm_loss)
+        _check(self.hm_loss, self.hm_factor)
         
         if self.with_region_map:
-            _check(outputs, self.losses['region'])
-            _check(self.losses['region_factor'], self.losses['region'])
+            _check(outputs, self.region_loss)
+            _check(self.region_factor, self.region_loss)
         
-        if self.with_cycle_detection and cycle_train:
-            _check(outputs, self.cd_losses['hm'])
-            _check(self.cd_losses['hm'], self.cd_losses['hm_factor'])
-            
-            if self.with_region_map:
-                _check(outputs, self.cd_losses['region'])
-                _check(self.cd_losses['region_factor'], self.cd_losses['region'])
      
         
 

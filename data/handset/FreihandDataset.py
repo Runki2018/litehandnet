@@ -33,8 +33,8 @@ class HandData(Dataset):
             raise ValueError("{} is not a json file!".format(ann_file))
         self.ann_json = json.load(open(ann_file, 'r'))
 
-        self.img_list = self.ann_json["images"][::20]
-        self.ann_list = self.ann_json["annotations"][::20]
+        self.img_list = self.ann_json["images"]
+        self.ann_list = self.ann_json["annotations"]
 
         self.n_joints = cfg['n_joints']
         self.simdr_split_ratio = cfg['simdr_split_ratio']
@@ -87,10 +87,10 @@ class HandData(Dataset):
         original_size = img_info["width"], img_info["height"]
         label = annotation["category_id"]
         # todo 多手数据集仍待解决
-        keypoints = np.array(annotation["keypoints"]).reshape((self.n_joints, 3))  # (n_hand, n_joints, xyc), 单手数据集n_hand=1
+        keypoints = np.array(annotation["keypoints"]).reshape((1, self.n_joints, 3))  # (n_hand, n_joints, xyc), 单手数据集n_hand=1
 
         # 读入图像
-        image = cv2.imread(self.img_root + file_name)
+        image = cv2.imread(os.path.join(self.img_root, file_name))
 
         if self.color_rgb:
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -100,20 +100,22 @@ class HandData(Dataset):
         # 缩放图像和关键点到指定的大小
         image = cv2.resize(image, self.image_size, interpolation=cv2.INTER_NEAREST)
         scale_ratio = np.array(self.image_size) / np.array(original_size)
-        keypoints[:, :2] *= scale_ratio
+        keypoints[..., :2] *= scale_ratio
         bbox = np.array(annotation['bbox'], dtype=np.float32)  
         bbox[:2] = bbox[:2] + bbox[2:] / 2  # [lx, ly, w, h] -> [cx, cy, w, h]
-        bbox = np.array([bbox]) * np.hstack([scale_ratio, scale_ratio])
+        bbox = bbox[None] * np.hstack([scale_ratio, scale_ratio])
         # 验证关键点是否可见，不可见设置为-1    
         keypoints = validate_keypoints(keypoints, img_size=self.image_size) 
         
         # data augmentation
         if self.is_augmentation:
-            image = adjust_gamma(image, prob=self.gamma_prob)
-            image = adjust_sigmoid(image, prob=self.sigmoid_prob)
-            image, keypoints, bbox = homography(image, keypoints[None], prob=self.homography_prob,
-                                                bbox=bbox[None], topleft=False)
-            image, keypoints, bbox = horizontal_flip(image, keypoints, prob=self.flip_prob, bbox=bbox)
+            image = adjust_gamma(image, self.gamma_prob)
+            image = adjust_sigmoid(image, self.sigmoid_prob)
+            image, keypoints, bbox = homography(image, keypoints, 
+                                                self.homography_prob,
+                                                bbox, False)
+            image, keypoints, bbox = horizontal_flip(image, keypoints,
+                                                     self.flip_prob,bbox=bbox)
             # 验证关键点是否可见，不可见设置为-1     
             keypoints = validate_keypoints(keypoints, img_size=self.image_size)       
                 
@@ -123,7 +125,7 @@ class HandData(Dataset):
         # label = 0 if validate_label(keypoints, self.image_size) else label  # 验证手部区域是否有多个点超出图像
         
         gt_kpts = np.zeros((self.max_num_object, self.n_joints, 3))
-        gt_kpts[0] = keypoints   
+        gt_kpts[0] = keypoints[0]   
         
         targets = []
         for i in range(len(self.hm_size)):
@@ -135,18 +137,22 @@ class HandData(Dataset):
             else:
                 kpts_hm, target_weight =\
                     self.get_heatmaps(
-                            keypoints,
-                            self.hm_size[i],
-                            self.hm_sigma[i],
-                            bbox,
-                            self.image_size[0]
+                            keypoints=keypoints,
+                            hm_size=self.hm_size[i],
+                            hm_sigma=self.hm_sigma[i],
+                            bbox=bbox,
+                            img_size=self.image_size[0]
                     )
                 #  (n_hand, n_joints, 1) -> (n_joints, 1)
                 target_weight = target_weight[0]
                 targets.append(kpts_hm)
 
         if self.simdr_split_ratio:
-            target_x, target_y = self.generate_sa_simdr(keypoints, target_weight, self.hm_sigma[0])
+            target_x, target_y = self.generate_sa_simdr(
+                                    joints=keypoints[0],
+                                    target_weight=target_weight,
+                                    sigma=self.hm_sigma[0]
+                                )
             return image, targets, target_weight, bbox, gt_kpts, target_x, target_y
         else:
             return image, targets, target_weight, bbox, gt_kpts
@@ -247,7 +253,9 @@ class HandData(Dataset):
         kpts_hm, target_weight = generate_multi_heatmaps(keypoints, img_size,
                                                          hm_size, hm_sigma,
                                                          self.joints_weight)  # heatmap
-        kpts_hm = combine_together(kpts_hm)  # 将多只手，同一个关键点的的热图叠加, (n_hand, 21, wh,wh) -> (21, wh,wh)
+        
+        # 将多只手，同一个关键点的的热图叠加, (n_hand, 21, wh,wh) -> (21, wh,wh)
+        kpts_hm = combine_together(kpts_hm)  
 
         if self.with_region_map:
             region_map = get_multi_regions(bbox, img_size, hm_size, hm_sigma)

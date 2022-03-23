@@ -22,7 +22,7 @@ def adjust_gamma(img, prob=0.5):
 
     p = np.random.rand()
     if p < prob:
-        if p > 0.75:
+        if p < prob / 2:
             gamma = np.random.randint(2, 10) / 10  # 0.2~1, 50% to brighten the image
         else:
             gamma = np.random.randint(1, 3)  # 1~3, 50% to darken the image
@@ -95,7 +95,7 @@ def _affine_bbox(bbox, mat, topleft, size):
             x1y1 = bbox[:, :2]
         else: # cx, cy, w, h
             x1y1 = bbox[:, :2] - bbox[:, 2:] / 2
-        x2y2 = bbox[:, :2] + bbox[:, 2:]
+        x2y2 = x1y1 + bbox[:, 2:]
         x1y2 = np.concatenate([x1y1[:, 0:1], x2y2[:, 1:2]], axis=1)
         x2y1 = np.concatenate([x2y2[:, 0:1], x1y1[:, 1:2]], axis=1)
             

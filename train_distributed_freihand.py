@@ -56,7 +56,7 @@ def main(gpu, cfg, DATASET, args):
     args.gpu = gpu
     init_spawn_distributed(cfg, args)
  
-    exp_name = cfg["dataset"] + '__' + cfg['model']  # experiment name
+    exp_name = cfg["dataset"] + '_' + cfg['model']  # experiment name
         
     # 定义参数
     epoch = 0  # 当前训练的epoch
@@ -65,7 +65,7 @@ def main(gpu, cfg, DATASET, args):
     save_root = cfg["save_root"] + exp_name + "/"
 
     device = torch.device(args.gpu)
-    args.lr = cfg['lr'] * args.world_size  # 学习率要根据并行GPU的数量进行倍增
+    cfg['lr'] = cfg['lr'] * args.world_size  # 学习率要根据并行GPU的数量进行倍增
 
     # 数据集和数据加载器
     test_set, test_loader = get_dataset(cfg, DATASET, is_train=False, distributed=True)
@@ -87,7 +87,6 @@ def main(gpu, cfg, DATASET, args):
         )
 
     # 存储参数的字典
-    best_loss = 0
     best_PCK = 0
     best_AP = 0
     save_dict = {}
@@ -109,8 +108,19 @@ def main(gpu, cfg, DATASET, args):
         
         model.load_state_dict(state_dict)
         if is_match:
-            optimizer.load_state_dict(save_dict["optimizer"])
             begin_epoch = save_dict["epoch"]
+            best_PCK = save_dict['mPCK'][-1] if 'mPCK' in save_dict.keys() \
+                else save_dict['PCK'] 
+            best_AP = save_dict['ap'][-1] if 'ap' in save_dict.keys() \
+                else save_dict['AP']
+            
+            if save_dict['config']['optim'] == cfg['optim']:
+                optimizer.load_state_dict(save_dict["optimizer"])
+                for state_dict in optimizer.state.values():
+                    # optimizer加载参数时,tensor默认在CPU上
+                    for k, v in state_dict.items():  
+                        if torch.is_tensor(v):
+                            state_dict[k] = v.to(device)
             
     else:
         # 如果不存在预训练权重，需要将第一个进程中的权重保存，然后其他进程载入，保持初始化权重一致
@@ -123,10 +133,7 @@ def main(gpu, cfg, DATASET, args):
         model.load_state_dict(
             torch.load(checkpoint_file, map_location=torch.device('cpu'))
             )
-    for state_dict in optimizer.state.values():
-        for k, v in state_dict.items():  # optimizer加载参数时,tensor默认在CPU上
-            if torch.is_tensor(v):
-                state_dict[k] = v.to(device)
+
     
     scheduler = get_scheduler(cfg, optimizer, args.FP16_ENABLED, begin_epoch)
      
@@ -156,8 +163,7 @@ def main(gpu, cfg, DATASET, args):
 
         model.train()
         loss_sum, loss_dict = train_one_epoch(
-            cfg, model, criterion, train_loader,train_set,
-            optimizer, device, args.FP16_ENABLED)    
+            cfg, model, criterion, train_loader, optimizer, device, args.FP16_ENABLED)    
         
         scheduler.step()
         
@@ -173,8 +179,8 @@ def main(gpu, cfg, DATASET, args):
             with torch.no_grad():                 
                 pck, ap, ap50 = test_one_epoch(
                     cfg, args.rank, epoch, model, test_loader,
-                    test_set.__len__(), result_parser, device,
-                    writer, args.FP16_ENABLED
+                    result_parser, device, writer
+                    
                 )
 
             # 等待所有进程计算完毕
@@ -222,9 +228,12 @@ def main(gpu, cfg, DATASET, args):
         if args.rank == 0 and epoch == end_epoch - 1:
                 save_dict = {
                 "epoch": epoch,
+                "PCK": pck,
+                "AP": ap,
+                "AP50": ap50,
                 "state_dict": model.state_dict(),
                 "optimizer": optimizer.state_dict(),
-                "config": cfg
+                "config": cfg,
                 }
                 save_file(save_root, save_dict)
 
@@ -270,6 +279,8 @@ def boot():
             )
         except KeyboardInterrupt:
             # dist.destroy_process_group()  # 训练完成后记得销毁进程组释放资源
+            torch.cuda.empty_cache()
+        finally:
             torch.cuda.empty_cache()
 
     else:

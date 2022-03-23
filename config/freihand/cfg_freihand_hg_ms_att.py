@@ -1,5 +1,5 @@
 cfg = {
-    'dataset': 'freihand_plus',
+    'dataset': 'freihand',
     'model': 'hg_ms_att',
     
     # model structure:
@@ -15,33 +15,33 @@ cfg = {
     'increase': 0,
  
     # data augmentation
-    'is_augment': False,   # ! 在使用 freihand_plus 没作用
+    'is_augment': True,   # ! 在使用 freihand_plus 没作用
     'bbox_alpha': 1.1, # 关键点边框放大倍率, 预测框偏大
-    'gamma_prob': 0.2,
-    'sigmoid_prob': 0.1,
-    'homography_prob': 0.3,
-    'flip_prob': 0.3,
+    'gamma_prob': 1,
+    'sigmoid_prob': 1,
+    'homography_prob': 1,
+    'flip_prob': 1,
     'use_different_joints_weight': False,
 
     # training setting
     "distributed": True,
     "with_cycle_detection": True,
-    "CUDA_VISIBLE_DEVICES": "0, 1, 2, 3",
-    'cycle_detection_reduction': 1,  # 循环检测分辨率下降因子
+    "CUDA_VISIBLE_DEVICES": "0,1,2,3",
+    'cycle_detection_reduction': 1,  # ! 循环检测分辨率下降因子
     'find_unused_parameters': False,
     'pin_memory': True,
-    'batch_size': 32,
+    'batch_size': 64,
     "syncBN": True,         # 这个很关键,对最终性能有略微提升的效果
     'workers': 4,
-    'optim': 'AdamW',  # 'SGD', ' AdamW' or RMSprop
-    "lr": 1e-3,  # 初始学习率，最小学习率约为 0.01 * lr
-    'T': 50,  # 周期
-    'lr_gamma': 0.9,  # 每周期学习率递减因子
-    "end_epoch": 250,
+    'optim': 'SGD',  # 'SGD', ' AdamW' or RMSprop
+    "lr": 1e-5,  # 初始学习率，最小学习率约为 0.01 * lr
+    'T': 30,  # 周期
+    'lr_gamma': 0.8,  # 每周期学习率递减因子
+    "end_epoch": 150,
     'seed': 1,
     
-    "reload": False,
-    "checkpoint": "",
+    "reload": True,
+    "checkpoint": 'output/freihand/steplr/freihand_plus_hg_ms_att/2022-03-20/best_pck.pt',
     "save_root": "./output/freihand/",
     
     # evaluation
@@ -55,7 +55,7 @@ cfg = {
     
     "hm_loss_factor": [1.0],
     "region_loss_factor": [1.0],
-    "kpt_loss": 'L2Loss',
+    "kpt_loss": 'SmoothL1Loss',
     "region_loss":'SmoothL1Loss',
 }
 

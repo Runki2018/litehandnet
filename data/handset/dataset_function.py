@@ -59,7 +59,7 @@ def generate_multi_heatmaps(batch_joints, img_size, heatmap_size, heatmap_sigma,
         :param img_size: (int or None) 输入图像的大小
         :return: target, target_weight(1: visible, 0: invisible)
     """
-    n_hand, n_joints, last_dim = batch_joints.shape  # 因为当前测试的是单手数据集，所以batch数，即手的数目
+    n_hand, n_joints, last_dim = batch_joints.shape
     
     target = np.zeros((n_hand, n_joints, heatmap_size, heatmap_size), dtype=np.float32)
     target_weight = np.ones((n_hand, n_joints, 1), dtype=np.float32)

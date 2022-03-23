@@ -2,6 +2,48 @@ import torch
 from torch import nn
 
 
+class KLFocalLoss(nn.Module):
+    """
+        参考cornerNet损失函数进行了修改
+        https://github.com/feifeiwei/Pytorch-CornerNet/blob/master/module/loss_module.py
+    """
+
+    def __init__(self):
+        super(KLFocalLoss, self).__init__()
+        self.Softmax = nn.Softmax(dim=2)
+        self.LogSoftmax = nn.LogSoftmax(dim=2)  # [B,LOGITS]
+        self.KLDiv = nn.KLDivLoss(reduction='none')
+        
+        
+    def criterion(self, hm_preds, hm_gts):
+        b, c, _, _ = hm_preds.shape
+        hm_preds = hm_preds.view(b, c, -1)
+        hm_gts = hm_gts.view(b, c, -1)
+        
+        log_scores = self.LogSoftmax(hm_preds)
+        gt_scorces = self.Softmax(hm_gts)
+        
+        loss = self.KLDiv(log_scores, gt_scorces)
+        loss = torch.sum(loss, dim=2)
+        return loss
+
+    def forward(self, hm_preds, hm_gts, hm_weight=None):
+        """
+
+        :param hm_preds: (batch, n_joints or 1+n_joints, hm_height, hm_width)
+        :param hm_gts: (batch, n_joints or 1+n_joints, hm_height, hm_width)
+        :param hm_weight: (batch, n_joints or 1+n_joints, 1)
+        :return:
+        """
+        if hm_weight is None:
+            loss = self.criterion(hm_preds, hm_gts).mean()
+        else:
+            hm_weight = hm_weight.view(hm_weight.shape[0], -1)
+            loss = self.criterion(hm_preds, hm_gts).mul(hm_weight).mean()
+
+        return loss
+
+
 class SmoothL1Loss(nn.Module):
     """
         参考cornerNet损失函数进行了修改
@@ -24,7 +66,7 @@ class SmoothL1Loss(nn.Module):
         loss = 0
         for batch_idx, (pred, gt) in enumerate(zip(hm_preds, hm_gts)):
             for joint_idx, (pred_, gt_) in enumerate(zip(pred, gt)):
-                if hm_weight is not None and hm_weight[batch_idx, joint_idx] == 0:
+                if hm_weight is not None and hm_weight[batch_idx, joint_idx] <= 0:
                     continue
                 loss +=  self.criterion(pred_, gt_)
 
@@ -57,7 +99,7 @@ class L2Loss(nn.Module):
         loss = 0
         for batch_idx, (pred, gt) in enumerate(zip(hm_preds, hm_gts)):
             for joint_idx, (pred_, gt_) in enumerate(zip(pred, gt)):
-                if hm_weight is not None and hm_weight[batch_idx, joint_idx] == 0:
+                if hm_weight is not None and hm_weight[batch_idx, joint_idx] <= 0:
                     continue
                 loss += self.criterion(pred_, gt_)
 

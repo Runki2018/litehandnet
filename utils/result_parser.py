@@ -263,6 +263,7 @@ class ResultParser:
                 if self.cd_enabled and \
                     self._is_cycle_detection( 
                         bbox, bboxes, pcfg['cd_iou'], pcfg['cd_ratio']):
+                        
                     pred_kpts[img_idx, bbox_idx] = \
                         self._get_second_result(model, img, bbox, heatmaps, img_idx)
                 else:
@@ -278,9 +279,9 @@ class ResultParser:
             bboxes (list): [bbox1, bbox2, ...]
             ratio (float, optional):  Defaults to 0.1.
         """
-        w, h = bbox[2:4]
-        r = (w * h) / self.image_area
-        if r <= ratio and w * h != 0:
+        area = bbox[2] * bbox[3]
+        r = area / self.image_area
+        if r <= ratio and area != 0:
             # print(f"less than {ratio=}")
             return True
         
@@ -333,9 +334,12 @@ class ResultParser:
         size = _fdiv(H, self.cd_reduction), _fdiv(W, self.cd_reduction)
         # mode 默认为nearest， 其他modes: linear | bilinear | bicubic | trilinear
         img_crop = torch.nn.functional.interpolate(img_crop, size=size) 
-        hm_list, _, _ = model(img_crop)
-
-        kpt = self.get_pred_kpt(hm_list[-1][:, 3:])  # (1, n_joints, 3)
+        if self.simdr_split_ratio > 0:
+            hm_list, _, _ = model(img_crop)
+        else:
+            hm_list = model(img_crop)
+            
+        kpt = self.get_pred_kpt(hm_list[-1][:, :-3])  # (1, n_joints, 3)
         kpt[:, :, :2] *= self.feature_stride.to(kpt.device)
         kpt[:, :, :2] *= torch.tensor([w / size[1], h / size[0]], device=kpt.device)
         kpt[:, :, :2] += torch.tensor([x1, y1], device=kpt.device)

@@ -1,26 +1,32 @@
 from datetime import datetime
 import torch
 import os
-import numpy as np
-from tqdm import tqdm
 from collections import defaultdict
 from utils.evaluation import evaluate_ap
 from train.spawn_dist import all_gather_object, all_reduce
 
 def save_file(save_root, save_dict, value=0,
               is_best_pck=False, is_best_ap=False):
-        save_dir = save_root + datetime.now().strftime("%Y-%m-%d")
+        save_dir = os.path.join(save_root, datetime.now().strftime("%Y-%m-%d")) 
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
+        log_file = os.path.join(save_dir, 'best_model.txt') 
 
         if is_best_pck:
-            file_name = "best_pck_{}.pt".format(round(value, 4))     
+            file_name = "best_pck.pt"
+            record_line = "epoch {:>3d}: \t pck {:.5f}\n".format(save_dict['epoch'], value)
         elif is_best_ap:
-            file_name = "best_ap_{}.pt".format(round(value, 4))
+            file_name = "best_ap.pt"
+            record_line = "epoch {:>3d}: \t ap  {:.5f}\n".format(save_dict['epoch'], value)
         else:
             file_name = "checkpoint.pt"
+            record_line = None
+            
+        if record_line:
+            with open(log_file, 'a+') as fd:
+                fd.write(record_line)
 
-        save_file = save_dir + file_name
+        save_file = os.path.join(save_dir, file_name)
         print(f"{save_file=}")
         torch.save(save_dict, save_file)
 
@@ -29,8 +35,7 @@ def _average_metric(sum_values, num_samples):
             return [v / num_samples * 100 for v in sum_values]
         return sum_values / num_samples * 100
 
-def test_one_epoch(cfg, rank, epoch, model, dataloader, num_samples,
-                   result_parser, device, writer, fp16=False):
+def test_one_epoch(cfg, rank, epoch, model, dataloader, result_parser, device, writer):
     
     NUM_OUT = len(cfg['hm_loss_factor'])
     metrics = dict( 
@@ -44,6 +49,7 @@ def test_one_epoch(cfg, rank, epoch, model, dataloader, num_samples,
     with_cycle_detection = cfg['with_cycle_detection']
     with_simdr = cfg['simdr_split_ratio'] > 0
     
+    num_samples = 0
     for meta in dataloader:
         if with_simdr:
             img, targets, target_weight, bbox, gt_kpts, target_x, target_y = meta
@@ -51,12 +57,13 @@ def test_one_epoch(cfg, rank, epoch, model, dataloader, num_samples,
         else:
             img, targets, target_weight, bbox, gt_kpts = meta
             outputs = model(img.to(device))
-        
+  
         if cfg['model'] == 'srhandnet':
                 outputs = [outputs[-1]]  # 只计算最后一个输出的性能指标
                 metrics = dict(ap=[0],ap50=[0],coor_pck=[0])
-                
+            
         num_img = img.shape[0]
+        num_samples += num_img
         for i, output_pred in enumerate(outputs):
             if with_region_map:
                 ap50, ap, _ = \
@@ -79,8 +86,10 @@ def test_one_epoch(cfg, rank, epoch, model, dataloader, num_samples,
                 
             metrics['coor_pck'][i] += \
                 result_parser.evaluate_pck(pred_kpts, gt_kpts, bbox, pck_thr) * num_img  
-                 
+    
+    num_samples = all_reduce([num_samples], device)[0]             
     for i, (metric_name, sum_values) in enumerate(metrics.items()):
+        # todo the last minibatch may be bigger than the actual number
         # metrics[metric_name] = all_gather_object(sum_values, rank)
         metrics[metric_name] = all_reduce(sum_values, device)     
         metrics[metric_name] = _average_metric(metrics[metric_name] , num_samples)
@@ -101,8 +110,7 @@ def test_one_epoch(cfg, rank, epoch, model, dataloader, num_samples,
     return metrics['coor_pck'][-1], metrics['ap'][-1], metrics['ap50'][-1]
 
 
-def train_one_epoch(cfg, model, criterion, train_loader, train_set,
-                    optimizer, device, fp16=False):
+def train_one_epoch(cfg, model, criterion, train_loader, optimizer, device, fp16=False):
     with_simdr = cfg['simdr_split_ratio'] > 0
     
     loss_sum = 0
@@ -118,12 +126,12 @@ def train_one_epoch(cfg, model, criterion, train_loader, train_set,
         if with_simdr:
             img, targets, target_weight, bbox, gt_kpts, target_x, target_y = meta
             outputs, pred_x, pred_y = model(img)
-            loss, _loss_dict = criterion(outputs, targets, target_weight, False,
+            loss, _loss_dict = criterion(outputs, targets, target_weight,
                                         pred_x, pred_y, target_x, target_y)
         else:
             img, targets, target_weight, bbox, gt_kpts = meta
             outputs = model(img)
-            loss, _loss_dict = criterion(outputs, targets, target_weight, False)
+            loss, _loss_dict = criterion(outputs, targets, target_weight)
 
         # compute gradient and do update step
         optimizer.zero_grad()

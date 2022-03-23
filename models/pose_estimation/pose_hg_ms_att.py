@@ -6,35 +6,6 @@ from torch.nn import functional as F
 from einops import rearrange, repeat
 from torch.nn import functional as F
 
-# class Merge(nn.Module):
-#     def __init__(self, x_dim, y_dim):
-#         super(Merge, self).__init__()
-#         self.conv = Conv(x_dim, y_dim, 1, relu=False, bn=False)
-
-#     def forward(self, x):
-#         return self.conv(x)
-
-# class Conv(nn.Module):
-#     def __init__(self, inp_dim, out_dim, kernel_size=3, stride=1, bn=False, relu=True):
-#         super(Conv, self).__init__()
-#         self.inp_dim = inp_dim
-#         self.conv = nn.Conv2d(inp_dim, out_dim, kernel_size, stride, padding=(kernel_size - 1) // 2, bias=True)
-#         self.relu = None
-#         self.bn = None
-#         if relu:
-#             self.relu = nn.ReLU()
-#         if bn:
-#             self.bn = nn.BatchNorm2d(out_dim)
-
-#     def forward(self, x):
-#         # assert x.size()[1] == self.inp_dim, "{} {}".format(x.size()[1], self.inp_dim)
-#         x = self.conv(x)
-#         if self.bn is not None:
-#             x = self.bn(x)
-#         if self.relu is not None:
-#             x = self.relu(x)
-#         return x
-
 class DWConv(nn.Module):
     """DepthwiseSeparableConvModul 深度可分离卷积"""
     def __init__(self, in_channel, out_channel, stride=1, padding=1, dilation=1,mid_relu=True, last_relu=True, bias=False):
@@ -252,11 +223,14 @@ class MultiScaleAttentionHourglass(nn.Module):
                 nn.Conv2d(oup_dim, inp_dim, 1, 1, 0)
             for _ in range(self.nstack - 1)])
         
-        self.image_size = cfg['image_size']  # (w, h)
+        
         k = cfg['simdr_split_ratio']  # default k = 2 
-        in_features = int(self.image_size[0] * self.image_size[1] / (4 ** 2))  # 下采样率是4，所以除以16  
-        self.pred_x = nn.Linear(in_features, int(self.image_size[0] * k)) 
-        self.pred_y = nn.Linear(in_features, int(self.image_size[1] * k))
+        self.with_simdr = k > 0
+        if self.with_simdr:
+            self.image_size = cfg['image_size']  # (w, h)
+            in_features = int(self.image_size[0] * self.image_size[1] / (4 ** 2))  # 下采样率是4，所以除以16  
+            self.pred_x = nn.Linear(in_features, int(self.image_size[0] * k)) 
+            self.pred_y = nn.Linear(in_features, int(self.image_size[1] * k))
         
     def forward(self, imgs):
         # our posenet
@@ -274,13 +248,16 @@ class MultiScaleAttentionHourglass(nn.Module):
                 x = x + self.merge_preds[i](preds) + self.merge_features[i](feature)
            
         # predict keypoints
-        kpts = hm_preds[-1][:, :-3]
-        # if imgs.shape[-1] != self.image_size[0]:
-        #     kpts = F.interpolate(kpts , scale_factor=2, mode='nearest')
-        kpts = rearrange(kpts, 'b c h w -> b c (h w)')
-        pred_x = self.pred_x(kpts)  # (b, c, w * k)
-        pred_y = self.pred_y(kpts)  # (b, c, h * k)   
-        return hm_preds, pred_x, pred_y
+        if self.with_simdr:
+            kpts = hm_preds[-1][:, :-3]
+            # if imgs.shape[-1] != self.image_size[0]:
+            #     kpts = F.interpolate(kpts , scale_factor=2, mode='nearest')
+            kpts = rearrange(kpts, 'b c h w -> b c (h w)')
+            pred_x = self.pred_x(kpts)  # (b, c, w * k)
+            pred_y = self.pred_y(kpts)  # (b, c, h * k)   
+            return hm_preds, pred_x, pred_y
+        else:
+            return hm_preds
     
     def check_init(self, cfg):
         assert isinstance(cfg['hm_size'], (tuple, list)), \
