@@ -240,11 +240,14 @@ class IterativeHead(nn.Module):
         return y[::-1]
 
 class LiteHRNet(nn.Module):
-    def __init__(self, cfg):
+    # def __init__(self, cfg):
+    def __init__(self):
         super().__init__()
-        out_channel= cfg['n_joints'] 
-        out_channel = out_channel + 3 if cfg['with_region_map'] else out_channel
-        
+        # out_channel= cfg['n_joints'] 
+        # out_channel = out_channel + 3 if cfg['with_region_map'] else out_channel
+        out_channel= 21
+        out_channel = out_channel + 3 
+
         self.stem = StemModule(
             in_channels=3, stem_channels=32, 
             out_channels=32, expand_ratio=1

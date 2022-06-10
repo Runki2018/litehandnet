@@ -1,39 +1,9 @@
-
+from turtle import forward
 import torch
 from torch import nn
-from torch.nn import functional as F
-from config import config_dict as cfg
 from einops import rearrange, repeat
 from torch.nn import functional as F
 
-# class Merge(nn.Module):
-#     def __init__(self, x_dim, y_dim):
-#         super(Merge, self).__init__()
-#         self.conv = Conv(x_dim, y_dim, 1, relu=False, bn=False)
-
-#     def forward(self, x):
-#         return self.conv(x)
-
-# class Conv(nn.Module):
-#     def __init__(self, inp_dim, out_dim, kernel_size=3, stride=1, bn=False, relu=True):
-#         super(Conv, self).__init__()
-#         self.inp_dim = inp_dim
-#         self.conv = nn.Conv2d(inp_dim, out_dim, kernel_size, stride, padding=(kernel_size - 1) // 2, bias=True)
-#         self.relu = None
-#         self.bn = None
-#         if relu:
-#             self.relu = nn.ReLU()
-#         if bn:
-#             self.bn = nn.BatchNorm2d(out_dim)
-
-#     def forward(self, x):
-#         # assert x.size()[1] == self.inp_dim, "{} {}".format(x.size()[1], self.inp_dim)
-#         x = self.conv(x)
-#         if self.bn is not None:
-#             x = self.bn(x)
-#         if self.relu is not None:
-#             x = self.relu(x)
-#         return x
 
 class DWConv(nn.Module):
     """DepthwiseSeparableConvModul 深度可分离卷积"""
@@ -53,30 +23,56 @@ class DWConv(nn.Module):
         out = self.last_relu(self.pointwise_conv(out)) 
         return out
 
-class Residual(nn.Module):
-    def __init__(self, inp_dim, out_dim):
-        super(Residual, self).__init__()
-   
-        relu = nn.ReLU()
+class BottleNeck(nn.Module):
+    """用于提高深度,但尽可能少地增加运算量, 不改变通道数"""
+    def __init__(self, channel):
+        super(BottleNeck, self).__init__()
         self.conv = nn.Sequential(
-            nn.BatchNorm2d(inp_dim),
-            relu,
-            nn.Conv2d(inp_dim, int(out_dim / 2), 1, 1, 0),
-            nn.BatchNorm2d(int(out_dim / 2)),
-            relu,
-            nn.Conv2d(int(out_dim / 2), int(out_dim / 2), 3, 1, 1),
-            nn.BatchNorm2d(int(out_dim / 2)),  
-            relu,
-            nn.Conv2d(int(out_dim / 2), out_dim, 1, 1, 0), 
+            nn.Conv2d(channel, channel // 4, 1, 1, 0),
+            nn.BatchNorm2d(channel // 4),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(channel // 4, channel // 4, 3, 1, 1),
+            nn.BatchNorm2d(channel // 4),  
+            nn.ReLU(inplace=True),
+            nn.Conv2d(channel // 4, channel, 1, 1, 0), 
+            nn.BatchNorm2d(channel),  
         )
-        
-        if inp_dim == out_dim:
-            self.skip_layer = nn.Identity()
-        else:
-            self.skip_layer = nn.Conv2d(inp_dim, out_dim, 1, 1, 0)
-
     def forward(self, x):
-        return self.skip_layer(x) + self.conv(x)
+        return F.relu(x + self.conv(x))
+
+
+class BasicBlock(nn.Module):
+    def __init__(self, inp_dim, out_dim, stride=1):
+        super(BasicBlock, self).__init__()
+
+        self.conv = nn.Sequential(
+            nn.Conv2d(inp_dim, out_dim, 3, stride, 1),
+            nn.BatchNorm2d(out_dim),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_dim, out_dim, 3, 1, 1),
+            nn.BatchNorm2d(out_dim),  
+        )
+
+        if stride == 2 or inp_dim != out_dim:
+            self.skip_layer = nn.Sequential(
+                nn.Conv2d(inp_dim, out_dim, 1, stride, 0),
+                nn.BatchNorm2d(out_dim)
+            )
+        else:
+            self.skip_layer = nn.Identity()
+    def forward(self, x):
+        return F.relu(self.skip_layer(x) + self.conv(x))
+
+class Residual(nn.Module):
+    def __init__(self, inp_dim, out_dim, stride=1, num_block=2):
+        super().__init__()
+        self.conv1 = BasicBlock(inp_dim, out_dim, stride)
+        self.blocks = nn.Sequential(*[BottleNeck(out_dim) for _ in range(num_block)])
+        
+    def forward(self, x):
+        out = self.conv1(x)
+        out = self.blocks(out)
+        return out
 
 class BRC(nn.Module):
     """  BN + Relu + Conv2d """    
@@ -94,34 +90,51 @@ class BRC(nn.Module):
         x = self.conv(x)
         return x
 
-class Hourglass(nn.Module):
-    def __init__(self, n, f, increase=0, basic_block=Residual):
-        super(Hourglass, self).__init__()
-        nf = f + increase
-        self.up1 = basic_block(f, f)
-        # Lower branch
-        self.pool1 = nn.MaxPool2d(2, 2)
-        self.low1 = basic_block(f, nf)
-        # Recursive hourglass
-        if n > 1:
-            self.low2 = Hourglass(n - 1, nf)
-        else:
-            self.low2 = basic_block(nf, nf)
-        self.low3 = basic_block(nf, f)
-        # self.up2 = nn.Upsample(scale_factor=2, mode='nearest')
 
+class EncoderDecoder(nn.Module):
+    def __init__(self, num_levels=5, inp_dim=128, num_blocks=[]):
+        super().__init__()
+        self.num_levels = num_levels
+        self.encoder = nn.ModuleList([])
+        self.decoder = nn.ModuleList([])
+        assert len(num_blocks) == num_levels - 1
+
+
+        self.encoder.append(ME_att(inp_dim, inp_dim))
+        for i in range(num_levels-1):
+            self.encoder.append(Residual(inp_dim, inp_dim, 2, num_blocks[i]))
+            self.decoder.append(Residual(inp_dim, inp_dim))
+        self.decoder.append(ME_att(inp_dim, inp_dim))
+        
     def forward(self, x):
-        up1 = self.up1(x)
-        pool1 = self.pool1(x)
-        low1 = self.low1(pool1)
+        out_encoder = []   # [128, 64, 32, 16, 8, 4]
+        out_decoder = []   # [4, 8, 16, 32, 64, 128]
+        
+        # encoder 
+        for encoder_layer in self.encoder:
+            x = encoder_layer(x)
+            out_encoder.append(x)
 
-        low2 = self.low2(low1)
+        # ! 我觉得只添加一次简单的shortcut就够了
+        h, w = out_encoder[-1].shape[2:]
+        shortcut = F.adaptive_avg_pool2d(out_encoder[0], (h, w))
 
-        low3 = self.low3(low2)
-        # up2 = self.up2(low3)
-        up2 = F.interpolate(low3, scale_factor=2)
-        return up1 + up2
-    
+        # decoder  
+        for i, decoder_layer in enumerate(self.decoder):
+            counterpart = out_encoder[self.num_levels-1-i]
+            if i == 0:
+                x = decoder_layer(counterpart)
+                x = x + shortcut
+            else:
+                h, w = counterpart.shape[2:]
+                x = decoder_layer(x)
+                x = F.interpolate(x, size=(h, w))
+                x = x + counterpart
+            out_decoder.append(x)
+         
+        return tuple(out_decoder) 
+
+
 class ME_att(nn.Module):
     """
     https://blog.csdn.net/KevinZ5111/article/details/104730835?utm_medium=distribute.pc_aggpage_search_result.none-task-blog-2~aggregatepage~first_rank_ecpm_v1~rank_v31_ecpm-4-104730835.pc_agg_new_rank&utm_term=block%E6%94%B9%E8%BF%9B+residual&spm=1000.2123.3001.4430
@@ -141,7 +154,7 @@ class ME_att(nn.Module):
                 DWConv(mid_c, mid_c),
                 DWConv(mid_c, mid_c),        
             )])
-        
+
         self.mid2_conv = nn.ModuleList([
             nn.Sequential(
                 DWConv(mid_c, mid_c // 2, dilation=2, padding=2),
@@ -162,7 +175,6 @@ class ME_att(nn.Module):
                             nn.Linear(out_c, out_c),
                             nn.Sigmoid(),  
                             )
-
     def forward(self, x):
         m = self.conv1(x)
         for i in range(2):
@@ -176,8 +188,9 @@ class ME_att(nn.Module):
         out = out * self.att(out).view(b, c, 1, 1)
         return out
 
+
 class my_pelee_stem(nn.Module):
-    """ 我在Conv1中再加了一个3x3卷积，来提高stem的初始感受野"""
+    """ 我在Conv1中再加了一个3x3卷积, 来提高stem的初始感受野"""
     def __init__(self, out_channel=256, min_mid_c=32):
         super().__init__()
         mid_channel = out_channel // 4 if out_channel // 4 >= min_mid_c else min_mid_c
@@ -200,12 +213,8 @@ class my_pelee_stem(nn.Module):
             nn.ReLU(True)
         )
         self.branch2 = nn.MaxPool2d(2, 2, ceil_mode=True)
-        
-        self.conv1x1 = nn.Sequential(   
-            nn.Conv2d(mid_channel * 2, out_channel, 1, 1, 0),
-            nn.BatchNorm2d(out_channel),
-            nn.ReLU(True)
-        )
+        self.conv1x1 = nn.Conv2d(mid_channel * 2, out_channel, 1, 1, 0)
+
 
     def forward(self, x):
         out = self.conv1(x)
@@ -214,65 +223,50 @@ class my_pelee_stem(nn.Module):
         out = torch.cat([b1, b2], dim=1)
         out = self.conv1x1(out)
         return out
-    
+
+
 class MultiScaleAttentionHourglass(nn.Module):
-    def __init__(self, nstack=cfg['nstack'], inp_dim=cfg['main_channels'], oup_dim=24,  increase=0,
-        basic_block=ME_att):
+    def __init__(self, cfg):
         super().__init__()
-        self.nstack = nstack
+        num_stage=cfg.MODEL.get('num_stage', 4)
+        inp_dim=cfg.MODEL.get('input_channel', 128)
+        oup_dim=cfg.MODEL.get('output_channel', cfg.DATASET.num_joints)
+        num_block=cfg.MODEL.get('num_block', [2, 2, 2, 2])
         self.pre = my_pelee_stem(inp_dim)
 
-        self.hgs = nn.ModuleList([
-            nn.Sequential(
-                Hourglass(4, inp_dim, increase, basic_block=basic_block),
-            ) for _ in range(nstack)])
+        self.hgs = nn.Sequential(
+            EncoderDecoder(num_stage, inp_dim, num_block)
+            ) 
 
-        self.features = nn.ModuleList([
-            nn.Sequential(
-                Residual(inp_dim, inp_dim),
+        self.features = nn.Sequential(
+                BottleNeck(inp_dim),
                 nn.BatchNorm2d(inp_dim),
                 nn.ReLU(),
                 nn.Conv2d(inp_dim, inp_dim, 1, 1, 0)
-            ) for _ in range(nstack)])
+            )
 
-        self.outs = nn.ModuleList([
-            nn.Conv2d(inp_dim, oup_dim, 1, 1, 0) for _ in range(nstack)])
-        
-        self.merge_features = nn.ModuleList([
-            nn.Conv2d(inp_dim, oup_dim, 1, 1, 0) for _ in range(nstack - 1)])
-        
-        self.merge_preds = nn.ModuleList([
-            nn.Conv2d(inp_dim, oup_dim, 1, 1, 0) for _ in range(nstack - 1)])
-        
-        
-        self.image_size = cfg['image_size']  # (w, h)
-        k = cfg['simdr_split_ratio']  # default k = 2 
-        in_features = int(self.image_size[0] * self.image_size[1] / (4 ** 2))  # 下采样率是4，所以除以16  
-        self.pred_x = nn.Linear(in_features, int(self.image_size[0] * k)) 
-        self.pred_y = nn.Linear(in_features, int(self.image_size[1] * k))
-        
+        self.outs = nn.Conv2d(inp_dim, oup_dim, 1, 1, 0)
+      
+        # self.image_size = cfg['image_size']  # (w, h)
+        # k = cfg['simdr_split_ratio']  # default k = 2 
+        # in_features = int(self.image_size[0] * self.image_size[1] / (4 ** 2))  # 下采样率是4，所以除以16  
+        # self.pred_x = nn.Linear(in_features, int(self.image_size[0] * k)) 
+        # self.pred_y = nn.Linear(in_features, int(self.image_size[1] * k))
+
     def forward(self, imgs):
         # our posenet
         x = self.pre(imgs)
+        hg = self.hgs(x)
+        feature = self.features(hg[-1])
+        preds = self.outs(feature)
 
-        hm_preds = []
-        for i in range(self.nstack):
-            hg = self.hgs[i](x)
-
-            feature = self.features[i](hg)
-            preds = self.outs[i](feature)
-
-            hm_preds.append(preds)
-            if i < self.nstack - 1:
-                x = x + self.merge_preds[i](preds) + self.merge_features[i](feature)
-           
         # predict keypoints
-        kpts = hm_preds[-1][:, 3:]
-        # if imgs.shape[-1] != self.image_size[0]:
-        #     kpts = F.interpolate(kpts , scale_factor=2, mode='nearest')
-        kpts = rearrange(kpts, 'b c h w -> b c (h w)')
-        pred_x = self.pred_x(kpts)  # (b, c, w * k)
-        pred_y = self.pred_y(kpts)  # (b, c, h * k)   
-        return hm_preds, pred_x, pred_y
+        # kpts = hm_preds[-1][:, 3:]
+        # # if imgs.shape[-1] != self.image_size[0]:
+        # #     kpts = F.interpolate(kpts , scale_factor=2, mode='nearest')
+        # kpts = rearrange(kpts, 'b c h w -> b c (h w)')
+        # pred_x = self.pred_x(kpts)  # (b, c, w * k)
+        # pred_y = self.pred_y(kpts)  # (b, c, h * k)   
+        # return hm_preds, pred_x, pred_y
+        return preds
 
-        

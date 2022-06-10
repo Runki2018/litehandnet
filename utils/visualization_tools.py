@@ -84,17 +84,21 @@ def draw_region_maps(hms):
         plt.close()
 
 
-def draw_bbox(img, lx, ly, rx, ry, color=(0, 0, 255)):
+def draw_bbox(img, bbox, xyxy=True, color=(0, 0, 255)):
     """
             画出边界框的位置
 
         :param img: cv读入的图片
-        :param lx: 左上角点的 x 坐标值
-        :param ly: 左上角点的 y 坐标值
-        :param rx: 右下角点的 x 坐标值
-        :param ry: 右下角点的 y 坐标值
+        :param bbox: 边界框,左上角和右下角表示xyxy 或 左上角和宽高表示xywh
+        :param xyxy: 确定bbox的格式
         :param color: BGR red default color
         """
+    if xyxy:
+        lx, ly, rx, ry = bbox
+    else:
+        lx, ly = bbox[0], bbox[1]
+        rx, ry = lx + bbox[2], ly + bbox[3]
+        
     leftTop = (int(lx), int(ly))  # 左上角的点坐标 (x,y)
     rightBottom = (int(rx), int(ry))  # 右下角的点坐标= (x+w,y+h)
     point_color = color  # BGR
@@ -104,7 +108,7 @@ def draw_bbox(img, lx, ly, rx, ry, color=(0, 0, 255)):
     return img
 
 
-def draw_point(img, keypoints):
+def draw_point(img, keypoints, is_rgb=True):
     """
 
         @param img: the image read by cv2, (h, w, c)
@@ -118,8 +122,9 @@ def draw_point(img, keypoints):
         points_list.append((xy[0], xy[1]))
 
     color_list = [(255, 0, 0), (0, 255, 255), (255, 0, 255), (255, 140, 0), (0, 0, 255), (0, 255, 0)]  # RGB
-    # for i, (r, g, b) in enumerate(color_list):
-    #     color_list[i] = (b, g, r)  # BGR
+    if not is_rgb:
+        for i, (r, g, b) in enumerate(color_list):
+            color_list[i] = (b, g, r)  # BGR
     point_size = 2
     thickness = 8  # 可以为 0 、4、8
     for i in range(n_kpts):

@@ -89,35 +89,37 @@ def homography(img, keypoints, prob=0.5, bbox=None, topleft=False):
         return img_out, keypoints_out, bbox
 
 def _affine_bbox(bbox, mat, topleft, size):
-        bbox = np.array(bbox)  # [num_people, 4]
-        num_people = len(bbox)
-        if topleft:  # lx ly w, h
-            x1y1 = bbox[:, :2]
-        else: # cx, cy, w, h
-            x1y1 = bbox[:, :2] - bbox[:, 2:] / 2
-        x2y2 = x1y1 + bbox[:, 2:]
-        x1y2 = np.concatenate([x1y1[:, 0:1], x2y2[:, 1:2]], axis=1)
-        x2y1 = np.concatenate([x2y2[:, 0:1], x1y1[:, 1:2]], axis=1)
-            
-        vertex = np.concatenate([x1y1, x1y2, x2y1, x2y2], axis=0)
-        vertex = np.concatenate([vertex, vertex[:, 0:1]*0+1], axis=1)   # 3 tuple vector
-        vertex = np.dot(vertex, mat.T)
+    """目标检测中,是不进行旋转变换的,即仿射变换时,最大旋转角度设置为零,因为旋转后的GT-BBOX,与关键点不同,旋转后的GT-BBOX可能不能很好的贴合目标边界, 所以affine_bbox这个自行设计的函数其实没有必要,也不合理。
+    """
+    bbox = np.array(bbox)  # [num_people, 4]
+    num_people = len(bbox)
+    if topleft:  # lx ly w, h
+        x1y1 = bbox[:, :2]
+    else: # cx, cy, w, h
+        x1y1 = bbox[:, :2] - bbox[:, 2:] / 2
+    x2y2 = x1y1 + bbox[:, 2:]
+    x1y2 = np.concatenate([x1y1[:, 0:1], x2y2[:, 1:2]], axis=1)
+    x2y1 = np.concatenate([x2y2[:, 0:1], x1y1[:, 1:2]], axis=1)
         
-        vertex = vertex[:, :2].reshape((num_people, 4, 2))
-        tl = np.min(vertex, axis=1)  # top-left-vertex
-        br = np.max(vertex, axis=1)  # bottom-right-vertex
-        
-        W, H = size
-        tl = np.maximum(tl, 0)
-        br[:, 0] = np.minimum(br[:, 0], W - 1)
-        br[:, 1] = np.minimum(br[:, 1], H - 1)
-        
-        if topleft:
-            bbox[:, :2] = tl
-        else:
-            bbox[:, :2] = (tl + br) / 2
-        bbox[:, 2:] = br - tl   
-        return bbox
+    vertex = np.concatenate([x1y1, x1y2, x2y1, x2y2], axis=0)
+    vertex = np.concatenate([vertex, vertex[:, 0:1]*0+1], axis=1)   # 3 tuple vector
+    vertex = np.dot(vertex, mat.T)
+    
+    vertex = vertex[:, :2].reshape((num_people, 4, 2))
+    tl = np.min(vertex, axis=1)  # top-left-vertex
+    br = np.max(vertex, axis=1)  # bottom-right-vertex
+    
+    W, H = size
+    tl = np.maximum(tl, 0)
+    br[:, 0] = np.minimum(br[:, 0], W - 1)
+    br[:, 1] = np.minimum(br[:, 1], H - 1)
+    
+    if topleft:
+        bbox[:, :2] = tl
+    else:
+        bbox[:, :2] = (tl + br) / 2
+    bbox[:, 2:] = br - tl   
+    return bbox
 
 def horizontal_flip(img, keypoints, prob=0.5, bbox=None):
     """
@@ -168,43 +170,3 @@ def central_scale(img, keypoints, resolution=(256, 256), prob=0.5):
 
     return img_crop, keypoints_out
 
-# def central_crop(img, bbox, keypoints, size=(256, 256), prob=0.5):
-#     """
-#         central crop the image and then scale to specific resolution
-#     :param size: final resolution after this process， （w, h）
-#     :param img: cv2 image, (h,w,c)
-#     :param bbox: (np.array([[cx, cy, w, h]], dtype=np.int16))
-#     :param keypoints: the coordinates of keypoints ->  (n_hand, 21,3)
-#     :param prob: the probability of flip
-#     """
-#     is_crop = False
-#     if np.random.rand() < prob:
-#         return img, bbox, keypoints, is_crop
-    
-#     is_crop = True
-#     h_img, w_img, c_img = img.shape
-#     num_object = bbox.shape[0]
-#     img_crop_list = []
-
-#     for i in range(num_object):
-#         x, y, w, h = bbox[i]
-#         x1, y1 = int(x - w/2), int(y - h/2)
-#         x2, y2 = int(x + w/2), int(y + h/2)
-#         w, h = x2 - x1, y2 - y1
-        
-#         img_crop = img[y1:y2, x1:y1]
-#         factor = min(size[0] / w, size[1] / h)
-#         nw, nh = w * factor, h * factor
-#         img_crop = cv2.resize(img_crop, (nw, nh), interpolation=cv2.INTER_LINEAR)
-        
-#         # 裁剪图下的关键点坐标
-#         keypoints[i] -= (x1, y1, 0)
-#         keypoints[i] *= (factor, factor, 1)
-
-#         # 将等长宽比放大后的图像填补为指定宽高的图像
-#         img_crop = np.pad(img_crop, ((0, size[1] - nh), (0, size[0] - nw), (0, 0)), 'constant', constant_values=128)
-#         img_crop_list.append(img_crop)
-    
-#     img_crops = np.stack(img_crop_list, axis=0)
-#     bbox_crop = get_bbox(keypoints, alpha=1.3)
-#     return img_crops, bbox_crop, keypoints, is_crop

@@ -30,42 +30,27 @@ def set_seeds(seed=1, cuda_deterministic=True):
         torch.backends.cudnn.benchmark = True
         torch.backends.cudnn.enabled = True
 
-def load_pretrained_state(model_state, pretrained_state):
+def load_pretrained_state(model_state, pretrained_state, verbose=False):
     """根据保持模型参数的关键字进行参数加载， 两个模型的不需要完全一致"""
     keys1 = model_state.keys()
     keys2 = pretrained_state.keys()
-    # print(f"{keys2=}")
     fully_match = True  # 两个模型参数字典是否完全一致
-    # for k1 in keys1:
-    #     for k2 in keys2:
-    #         if k1 in k2 and model_state[k1].shape == pretrained_state[k2].shape:
-    #             model_state[k1] = pretrained_state[k2]
-    #         elif k1 in k2 and model_state[k1].shape != pretrained_state[k2].shape:
-    #             print(f"{k1=}\t{ model_state[k1].shape}")
-    #             print(f"{k2=}\t{ pretrained_state[k2].shape}")
-    #             print('-' * 30)
     i = 0
     for k2 in keys2:
         k2_s = k2.strip('module.')
-        # ok = False
         for k1 in keys1:
             if k2_s in k1 and model_state[k1].shape == pretrained_state[k2].shape:
                 model_state[k1] = pretrained_state[k2]
-                ok = True
                 i +=1
-            # elif k2_s in k1 and model_state[k1].shape != pretrained_state[k2].shape:
-            #     print(f"{k1=}\t{ model_state[k1].shape}")
-            #     print(f"{k2=}\t{ pretrained_state[k2].shape}")
-            #     print('-' * 30)
-            #     ok = True
-        
-        # if not ok:
-        #     print(f"{k2=}\t{ pretrained_state[k2].shape}")
+            elif verbose and k2_s in k1 \
+                and model_state[k1].shape != pretrained_state[k2].shape:
+                print(f"{k1=}\t{ model_state[k1].shape}")
+                print(f"{k2=}\t{ pretrained_state[k2].shape}")
+                print('-' * 30)
 
     if i != len(keys1):
         fully_match = False
     return model_state, fully_match
-
 
 class TqdmFile(object):
     dummy_file = None

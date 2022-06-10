@@ -153,11 +153,13 @@ def _get_wh(wh_region_maps, bi, center, image_size, heatmap_sigma=2):
     # TODO: use NMS to get multiple c ,and then to get s according to c
     gamma_x = wh_region_maps[bi, 0, y1:y2, x1:x2].flatten().mean(dim=-1)
     gamma_y = wh_region_maps[bi, 1, y1:y2, x1:x2].flatten().mean(dim=-1)
-    gamma_x = torch.clip(gamma_x, 0, 1)  # 0 <= x <= 1
-    gamma_y = torch.clip(gamma_y, 0, 1)  # 0 <= y <= 1
-    w = h = image_size  # ! only fit the condition of same size
-    s_x = gamma_x * w
-    s_y = gamma_y * h
+    # gamma_x = torch.clip(gamma_x, 0, 1)  # 0 <= x <= 1
+    # gamma_y = torch.clip(gamma_y, 0, 1)  # 0 <= y <= 1
+    # w = h = image_size  # ! only fit the condition of same size
+    # s_x = gamma_x * w
+    # s_y = gamma_y * h
+    s_x = gamma_x * image_size / heatmap_size
+    s_y = gamma_y * image_size / heatmap_size
     return s_x, s_y
 
 

@@ -44,72 +44,6 @@ class KLFocalLoss(nn.Module):
         return loss
 
 
-class SmoothL1Loss(nn.Module):
-    """
-        参考cornerNet损失函数进行了修改
-        https://github.com/feifeiwei/Pytorch-CornerNet/blob/master/module/loss_module.py
-    """
-
-    def __init__(self):
-        super(SmoothL1Loss, self).__init__()
-        self.criterion = nn.SmoothL1Loss()
-
-    def forward(self, hm_preds, hm_gts, hm_weight=None):
-        """
-
-        :param hm_preds: (batch, n_joints or 1+n_joints, hm_height, hm_width)
-        :param hm_gts: (batch, n_joints or 1+n_joints, hm_height, hm_width)
-        :param hm_weight: (batch, n_joints or 1+n_joints, 1)
-        :return:
-        """
-
-        loss = 0
-        for batch_idx, (pred, gt) in enumerate(zip(hm_preds, hm_gts)):
-            for joint_idx, (pred_, gt_) in enumerate(zip(pred, gt)):
-                if hm_weight is not None and hm_weight[batch_idx, joint_idx] <= 0:
-                    continue
-                loss +=  self.criterion(pred_, gt_)
-
-        loss /= hm_gts.shape[0]
-        if torch.isnan(loss):
-            import pdb
-            pdb.set_trace()
-
-        return loss
-
-class L2Loss(nn.Module):
-    """
-        参考cornerNet损失函数进行了修改
-        https://github.com/feifeiwei/Pytorch-CornerNet/blob/master/module/loss_module.py
-    """
-
-    def __init__(self):
-        super(L2Loss, self).__init__()
-        self.criterion = nn.MSELoss(reduction='mean')
-
-    def forward(self, hm_preds, hm_gts, hm_weight=None):
-        """
-
-        :param hm_preds: (batch, n_joints or 1+n_joints, hm_height, hm_width)
-        :param hm_gts: (batch, n_joints or 1+n_joints, hm_height, hm_width)
-        :param hm_weight: (batch, n_joints or 1+n_joints, 1)
-        :return:
-        """
-
-        loss = 0
-        for batch_idx, (pred, gt) in enumerate(zip(hm_preds, hm_gts)):
-            for joint_idx, (pred_, gt_) in enumerate(zip(pred, gt)):
-                if hm_weight is not None and hm_weight[batch_idx, joint_idx] <= 0:
-                    continue
-                loss += self.criterion(pred_, gt_)
-
-        loss /= hm_gts.shape[0]
-        if torch.isnan(loss):
-            import pdb
-            pdb.set_trace()
-
-        return loss
-
 
 class FocalLoss(nn.Module):
     """
@@ -238,21 +172,37 @@ class RegionLoss(nn.Module):
 
 
 # derived from https://github.com/leoxiaobin/deep-high-resolution-net.pytorch
-class JointsMSELoss(nn.Module):
-    def __init__(self, use_target_weight=True):
+class JointsDistanceLoss(nn.Module):
+    def __init__(self, use_target_weight=True, loss_type='mse'):
         """
-        MSE loss between output and GT body joints
+        MSE/MAE/SmoothL1 loss between output and GT body joints
 
         Args:
             use_target_weight (bool): use target weight.
                 WARNING! This should be always true, otherwise the loss will sum the error for non-visible joints too.
                 This has not the same meaning of joint_weights in the COCO dataset.
         """
-        super(JointsMSELoss, self).__init__()
-        self.criterion = nn.MSELoss(reduction='mean')  # todo ‘ mean’ 好，还是 ‘sum’ 好呢？
+        super(JointsDistanceLoss, self).__init__()
+        assert loss_type.lower() in ['mse', 'mae', 'smoothl1']
+        if loss_type.lower() == 'mse':
+            self.criterion = nn.MSELoss(reduction='mean')
+        elif loss_type.lower() == 'mae':
+            self.criterion = nn.L1Loss(reduction='mean')
+        else:
+            self.criterion = nn.SmoothL1Loss(reduction='mean')
         self.use_target_weight = use_target_weight
 
     def forward(self, output, target, target_weight=None):
+        """
+
+        Args:
+            output (tensor): [N, K, H, W]
+            target (tensor): [N, K, H, W]
+            target_weight (tensor): [N, K, 1]
+
+        Returns:
+            loss: scalar
+        """
         batch_size = output.shape[0]
         num_joints = output.shape[1]
         heatmaps_pred = output.reshape((batch_size, num_joints, -1)).split(1, 1)
@@ -273,6 +223,36 @@ class JointsMSELoss(nn.Module):
                 loss += 0.5 * self.criterion(heatmap_pred, heatmap_gt)
 
         return loss / num_joints
+
+
+class DistanceLoss(nn.Module):
+    def __init__(self, loss_type='L2', reduction='mean'):
+        super().__init__()
+        if loss_type.lower() == 'l2':
+            self.criterion = nn.MSELoss(reduction='none')
+        elif loss_type.lower() == 'l1':
+            self.criterion = nn.L1Loss(reduction='none')
+        else:
+            self.criterion = nn.SmoothL1Loss(reduction='none')
+        
+        assert reduction in ['mean', 'sum', None], f"Error: {reduction=}"
+        self.reduction = reduction
+
+    def forward(self, output, target, target_weight):
+        """
+        Args:
+            output (tensor): [N, K, H, W]
+            target (tensor): [N, K, H, W]
+            target_weight (tensor): [N, K, 1]
+        """
+        loss = self.criterion(output, target)
+        loss *= target_weight.unsqueeze(-1)
+        
+        if self.reduction == 'mean':
+            return loss.mean()
+        elif self.reduction == 'sum':
+            return loss.sum()
+        return loss
 
 
 if __name__ == '__main__':

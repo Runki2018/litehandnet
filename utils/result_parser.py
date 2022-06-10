@@ -153,7 +153,6 @@ class ResultParser:
                 x, y = int(x), int(y)
                 candidates[bi, ki, 2] = size_maps[bi, 0, y, x]  # get region width ratio 0~1
                 candidates[bi, ki, 3] = size_maps[bi, 1, y, x]  # get region height ratio 0~1
-        candidates[..., 2:4] = candidates[..., 2:4].clip(0, 0.99)  # a ratio: 0~1
         candidates[..., 4] = top_val  # confidence
         
         for i in range(self.num_candidates):
@@ -166,7 +165,10 @@ class ResultParser:
 
         # resize center x,y and size w,h from heatmap to original image
         candidates[..., :2] *= self.feature_stride
-        candidates[..., 2:4] *= self.image_size  # width and height of bbox             
+        # candidates[..., 2:4] = candidates[..., 2:4].clip(0, 0.99)  # a ratio: 0~1
+        # candidates[..., 2:4] *= self.image_size  # width and height of bbox  
+        # width and height of bbox                        
+        candidates[..., 2:4] *= self.feature_stride
         return candidates
 
     def non_max_suppression(self, candidates):

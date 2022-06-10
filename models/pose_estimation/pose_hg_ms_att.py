@@ -232,6 +232,8 @@ class MultiScaleAttentionHourglass(nn.Module):
             self.pred_x = nn.Linear(in_features, int(self.image_size[0] * k)) 
             self.pred_y = nn.Linear(in_features, int(self.image_size[1] * k))
         
+        self.init_weights()
+        
     def forward(self, imgs):
         # our posenet
         x = self.pre(imgs)
@@ -258,16 +260,12 @@ class MultiScaleAttentionHourglass(nn.Module):
             return hm_preds, pred_x, pred_y
         else:
             return hm_preds
+        
+    def init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
     
-    def check_init(self, cfg):
-        assert isinstance(cfg['hm_size'], (tuple, list)), \
-            "hm_size should be a tuple or list"
-        assert isinstance(cfg['hm_sigma'], (tuple, list)), \
-            "hm_sigma should be a tuple or list"
-        assert isinstance(cfg['hm_loss_factor'], (tuple, list)), \
-            "loss_factor should be a tuple or list"
-        assert len(cfg['hm_size']) == len(cfg['hm_sigma']), "Length must be equal !"
-        assert len(cfg['hm_size']) == len(cfg['hm_loss_factor']), "Length must be equal !"
-        
-
-        

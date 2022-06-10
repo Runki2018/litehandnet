@@ -7,7 +7,7 @@ import torch.distributed as dist
 from utils.training_kits import set_seeds
 
 
-def init_spawn_distributed(cfg, args):
+def init_spawn_distributed(args):
     if args.FP16_ENABLED:
         assert torch.backends.cudnn.enabled, \
             "fp16 mode requires cudnn backend to be enabled."
@@ -34,7 +34,7 @@ def init_spawn_distributed(cfg, args):
 
 def model_cuda(cfg, args, model):
     if args.distributed:
-        if cfg['syncBN']:
+        if cfg.TRAIN.syncBN:
             model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
         # For multiprocessing distributed, DistributedDataParallel constructor
         # should always set the single device scope, otherwise,
@@ -48,14 +48,14 @@ def model_cuda(cfg, args, model):
             # args.workers = int(args.workers / ngpus_per_node)
             model = torch.nn.parallel.DistributedDataParallel(
                 model, device_ids=[args.gpu],
-                find_unused_parameters=cfg['find_unused_parameters']
+                find_unused_parameters=cfg.TRAIN.find_unused_parameters
             )
         else:
             model.cuda()
             # DistributedDataParallel will divide and allocate batch_size to all
             # available GPUs if device_ids are not set
             model = torch.nn.parallel.DistributedDataParallel(
-                model, find_unused_parameters=cfg['find_unused_parameters'])
+                model, find_unused_parameters=cfg.TRAIN.find_unused_parameters)
     elif args.gpu is not None:
         torch.cuda.set_device(args.gpu)
         model = model.cuda(args.gpu)
@@ -72,13 +72,12 @@ def all_reduce(values, device='cuda'):
     assert isinstance(values, (list, tuple)), "{} should be a list or tuple".format(values)  
     # define tensor on GPU, count and total is the result at each GPU
     _part_results = torch.tensor(values, dtype=torch.float32, device=device)
-    
     # synchronizes all processes
     dist.barrier()
     # Reduces the tensor data across all machines in such a way that all get the final result.
     dist.all_reduce(_part_results, op=torch.distributed.ReduceOp.SUM)
     all_reults = _part_results.tolist()
-    
+
     return all_reults
 
 def all_gather_object(values, rank):

@@ -74,7 +74,7 @@ def generate_multi_heatmaps(batch_joints, img_size, heatmap_size, heatmap_sigma,
         joints = batch_joints[idx]
 
         tmp_size = heatmap_sigma * 3
-
+        
         for joint_id in range(n_joints):
             mu_x = int(joints[joint_id][0] / feat_stride)
             mu_y = int(joints[joint_id][1] / feat_stride)
@@ -114,7 +114,7 @@ def generate_multi_heatmaps(batch_joints, img_size, heatmap_size, heatmap_sigma,
 
 
 def get_bbox(keypoints, img_size=(256, 256), alpha=1.3):
-    """ 根据关键点获取边界框，alpha是将仅仅贴合关键点的框放大的倍数
+    """ 根据关键点获取边界框, alpha是将仅仅贴合关键点的框放大的倍数
 
     Args:
         keypoints ([type]): numpy.array([n_hand, 21, 3])
@@ -162,7 +162,6 @@ def get_multi_regions(bbox, img_size, heatmap_size, heatmap_sigma):
     n_hand = bbox.shape[0]
     # 每个手有3个region maps, 每张热图也有其相应的权重
     multi_hand_regions = np.zeros((n_hand, 3, heatmap_size, heatmap_size), dtype=np.float32)
-    region_weights = np.ones((n_hand, 1, 1), dtype=np.float32)
 
     for i_hand in range(n_hand):
         c = bbox[i_hand, :2]
@@ -191,9 +190,10 @@ def get_hw_region_map(c, s, img_size, heatmap_size, heatmap_sigma):
 
     wh_region_map = np.zeros((2, heatmap_size, heatmap_size), dtype=np.float32)
     w, h = img_size, img_size  # ! 现在都是方向图片
-    gamma_x, gamma_y = s[0] / w, s[1] / h
-    gamma_x = np.clip(gamma_x, 0, 1)  # 0 <= x <= 1
-    gamma_y = np.clip(gamma_y, 0, 1)  # 0 <= y <= 1
+    gamma_x, gamma_y = s[0] * heatmap_size / w, s[1] * heatmap_size / h
+    # gamma_x, gamma_y = s[0] / w, s[1] / h
+    # gamma_x = np.clip(gamma_x, 0, 1)  # 0 <= x <= 1
+    # gamma_y = np.clip(gamma_y, 0, 1)  # 0 <= y <= 1
 
     stride_size = heatmap_size / img_size  # [22, 22,22,44,88] / 256
     x, y = np.array(c) * stride_size

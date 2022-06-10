@@ -33,8 +33,8 @@ class HandData(Dataset):
             raise ValueError("{} is not a json file!".format(ann_file))
         self.ann_json = json.load(open(ann_file, 'r'))
 
-        self.img_list = self.ann_json["images"]
-        self.ann_list = self.ann_json["annotations"]
+        self.img_list = self.ann_json["images"][::40]
+        self.ann_list = self.ann_json["annotations"][::40]
 
         self.n_joints = cfg['n_joints']
         self.simdr_split_ratio = cfg['simdr_split_ratio']
@@ -216,7 +216,7 @@ class HandData(Dataset):
             return img_crop, targets, gt_kpts, target_x, target_y
         else:
             return img_crop, targets, gt_kpts
-                
+
     def generate_sa_simdr(self, joints, target_weight, sigma):
         """
         :param joints:  [num_joints, 3]
@@ -233,15 +233,15 @@ class HandData(Dataset):
                             dtype=np.float32)
 
         for joint_id in range(self.n_joints):
-            if target_weight[joint_id] > 0:                   
+            if target_weight[joint_id] > 0:
                 mu_x, mu_y = joints[joint_id, :2] * self.simdr_split_ratio
-                
+
                 x = np.arange(0, int(self.image_size[0] * self.simdr_split_ratio), 1, np.float32)
                 y = np.arange(0, int(self.image_size[1] * self.simdr_split_ratio), 1, np.float32)
-    
+
                 target_x[joint_id] = (np.exp(- ((x - mu_x) ** 2) / (2 * sigma ** 2))) 
                 target_y[joint_id] = (np.exp(- ((y - mu_y) ** 2) / (2 * sigma ** 2)))
-        
+
         if self.joints_weight is not None:
             target_weight = np.multiply(target_weight, self.joints_weight)
 
