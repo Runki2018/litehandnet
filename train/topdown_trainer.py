@@ -30,11 +30,9 @@ def val_one_epoch(cfg, device, model, criterion, val_loader):
     loss_dict = defaultdict(float)
     for meta in val_loader:
         img = meta['img']
-        target = meta['target']
-        target_weight = meta['target_weight']
-        outputs = model(img.to(device))
-        _, _loss_dict = criterion(outputs, target, target_weight)
-        
+        outputs = model(img.to(device, non_blocking=True))
+        _, _loss_dict = criterion(outputs, meta)
+
         for k, v in _loss_dict.items():    
             loss_dict['sum'] += v
             loss_dict[k] += v
@@ -49,17 +47,14 @@ def warmup(step, warmup_steps, max_lr, device, model, criterion,
     """
     for meta in train_loader: 
         img = meta['img']
-        target = meta['target']
-        target_weight = meta['target_weight']
-
         if step <= warmup_steps:
             lr = max_lr * step / warmup_steps
             for param_group in optimizer.param_groups:
                 param_group['lr'] = lr
         step += 1
 
-        outputs = model(img.to(device))
-        loss, _ = criterion(outputs, target, target_weight)
+        outputs = model(img.to(device, non_blocking=True))
+        loss, _ = criterion(outputs, meta)
         # compute gradient and do update step
         optimizer.zero_grad()
         if fp16:
@@ -73,11 +68,8 @@ def train_one_epoch(cfg, device, model, criterion, train_loader, optimizer, fp16
     loss_dict = defaultdict(float)
     for meta in train_loader: 
         img = meta['img']
-        target = meta['target']
-        target_weight = meta['target_weight']
-
-        outputs = model(img.to(device))
-        loss, _loss_dict = criterion(outputs, target, target_weight)
+        outputs = model(img.to(device, non_blocking=True))
+        loss, _loss_dict = criterion(outputs, meta)
 
         # compute gradient and do update step
         optimizer.zero_grad()

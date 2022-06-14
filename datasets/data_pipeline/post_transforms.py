@@ -19,10 +19,8 @@ def transform_preds(coords, center, scale, output_size, use_udp=False):
               flipped_tags)
 
         center (np.ndarray[2, ]): Center of the bounding box (x, y).
-        scale (np.ndarray[2, ]): Scale of the bounding box
-            wrt [width, height].
-        output_size (np.ndarray[2, ] | list(2,)): Size of the
-            destination heatmaps.
+        scale (np.ndarray[2, ]): Scale of the bounding box wrt [width, height].
+        output_size (np.ndarray[2, ] | list(2,)): Size of the destination heatmaps.
         use_udp (bool): Use unbiased data processing
 
     Returns:

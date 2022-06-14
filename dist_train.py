@@ -16,7 +16,7 @@ from config import get_config
 from models import get_model
 from datasets.dataloader import make_dataloader
 from train.optimizer_scheduler import get_optimizer, get_scheduler
-from utils.post_processing.decoder import TopDownDecoder
+# from utils.post_processing.decoder import TopDownDecoder
 from utils.training_kits import load_pretrained_state
 from train.topdown_trainer import train_one_epoch, val_one_epoch, save_file, warmup
 from utils.misc import get_checkpoint_path, get_output_path, get_pickle_path
@@ -70,7 +70,7 @@ def main(gpu, cfg, args):
     # 多GPU训练
     model = get_model(cfg)   
     model = model_cuda(cfg, args, model)
-    criterion = get_loss(cfg)
+    criterion = get_loss(cfg).cuda()
     
     cfg.OPTIMIZER.lr *= args.world_size  # 学习率要根据并行GPU的数量进行倍增
     optimizer = get_optimizer(cfg, model, criterion) 
@@ -78,13 +78,14 @@ def main(gpu, cfg, args):
     if args.FP16_ENABLED:
         model = network_to_half(model)
         optimizer = FP16_Optimizer(
+            cfg,
             optimizer,
             static_loss_scale=1.0,
             dynamic_loss_scale=True
         )
 
     # 定义参数
-    exp_name = cfg.DATASET.name + '_' + cfg.MODEL.name  # experiment name
+    exp_name = str(cfg.ID) + cfg.DATASET.name + '_' + cfg.MODEL.name  # experiment name
 
     begin_epoch = 0  # 开始的epoch
     min_val_loss = 1e6
@@ -128,7 +129,7 @@ def main(gpu, cfg, args):
         model.load_state_dict(state_dict)
 
     
-    scheduler = get_scheduler(optimizer, args.FP16_ENABLED, begin_epoch)
+    scheduler = get_scheduler(cfg, optimizer, args.FP16_ENABLED, begin_epoch)
 
     if args.rank == 0:  # 在第一个进程中打印信息，并实例化tensorboard
         print(args)
@@ -144,20 +145,20 @@ def main(gpu, cfg, args):
     else:
         writer = None
 
-    
-    max_lr = cfg.OPTIMIZER.lr
-    warmup_steps = min(cfg.OPTIMIZER.warmup_steps, train_set.__len__())
-    step = 1
+    if not (cfg.CHECKPOINT.resume and checkpoint_file.exists()):
+        max_lr = cfg.OPTIMIZER.lr
+        warmup_steps = min(cfg.OPTIMIZER.warmup_steps, train_set.__len__())
+        step = 1
 
-    model.train()
-    while step < warmup_steps:
-        if args.rank == 0:
-            print(f"warmup:{step}/{warmup_steps}")
-            train_loader = tqdm(train_loader, desc="warm up ...") 
-        step = warmup(step, warmup_steps, max_lr, device, model, criterion,
-                      train_loader, optimizer, args.FP16_ENABLED)
+        model.train()
+        while step < warmup_steps:
+            if args.rank == 0:
+                print(f"warmup:{step}/{warmup_steps}")
+                train_loader = tqdm(train_loader, desc="warm up ...") 
+            step = warmup(step, warmup_steps, max_lr, device, model, criterion,
+                        train_loader, optimizer, args.FP16_ENABLED)   
 
-    result_decoder = TopDownDecoder(cfg)
+    # result_decoder = TopDownDecoder(cfg)
     for epoch in range(begin_epoch, end_epoch):  
         if args.rank == 0:
             print('\nExp %s Epoch %d of %d @ %s' %
@@ -194,11 +195,11 @@ def main(gpu, cfg, args):
             if args.rank == 0:
                 lr = optimizer.param_groups[0]['lr']
                 print(f"{lr=}")
-                print("train loss".center(30, '-'))
+                print("train loss".center(50, '-'))
                 for name, loss_value in train_loss_dict.items():
                     print(f"{name:8}: {loss_value:.3f}", end='\t')
                 print()
-                print("val loss".center(30, '-'))
+                print("val loss".center(50, '-'))
                 for name, loss_value in val_loss_dict.items():
                     print(f"{name:8}: {loss_value:.3f}", end='\t')
                 print()
@@ -258,7 +259,9 @@ def boot():
         args.world_size = int(os.environ["WORLD_SIZE"])
 
     args.distributed = args.world_size > 1 or cfg.TRAIN.distributed
-    args.ngpus_per_node = torch.cuda.device_count()
+    device_count = torch.cuda.device_count()
+    num_visable_device = len(str(cfg.TRAIN.CUDA_VISIBLE_DEVICES).split(','))
+    args.ngpus_per_node = max(1, min(device_count, num_visable_device))
     cfg['TRAIN']['num_gpus'] = args.ngpus_per_node
 
     if args.distributed:

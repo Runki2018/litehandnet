@@ -38,10 +38,35 @@ class KLDiscretLoss(nn.Module):
             loss += (self.criterion(coord_y_pred, coord_y_gt).mul(weight).mean())
         return loss / num_joints
 
-# def ae_loss(tag_x, tag_y, mask):
-#     # TODO: 如何实现这个pull和push函数呢？
-#     num = mask.sum(dim=1, keepdim=True).float()
-     
+
+class SimDRLoss(nn.Module):
+    def __init__(self, cfg=None):
+        super().__init__()
+        image_size = cfg.DATASET.image_size
+        heatmap_size = cfg.DATASET.heatmap_size
+        k = cfg.PIPELINE.simdr_split_ratio
+
+        self.simdr_width = int(k * image_size[0])
+        self.simdr_height = int(k * image_size[1])
+
+        in_features = int(heatmap_size[0] * heatmap_size[1])
+        self.x_shared_decoder = nn.Linear(in_features, self.simdr_width)
+        self.y_shared_decoder = nn.Linear(in_features, self.simdr_height)
+        self.loss = KLDiscretLoss()
+
+    def forward(self, heatmap, simdr_x, simdr_y, target_weight):
+        """
+        Args:
+            heatmap (tensor): [B, K, H, W]
+            simdr_x (tensor): [B, K, simdr_width] target x vector
+            simdr_y (tensor): [B, K, simdr_height] target y vector
+            target_weight (tensor): [B, K, 1]
+        """
+        pred_x = self.x_shared_decoder(heatmap.flatten(start_dim=2))
+        pred_y = self.y_shared_decoder(heatmap.flatten(start_dim=2))
+        loss = self.loss(pred_x, pred_y, simdr_x, simdr_y, target_weight)
+
+        return loss
 
 
 

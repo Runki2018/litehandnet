@@ -110,16 +110,21 @@ def build_dataset(cfg, data_type='train'):
             # HandRandomFlip(P.flip_prob),
             TopDownRandomFlip(P.flip_prob),
             TopDownGetRandomScaleRotation(P.rot_factor, P.scale_factor, P.rot_prob),
-            TopDownAffine(P.use_udp),
+            TopDownAffine(P.use_udp),  # 裁剪出手部区域，并放缩到指定大小
             ToTensor(),
             NormalizeTensor(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            GenerateTarget])
+            GenerateTarget,
+            GenerateSimDR(P.sigma, P.simdr_split_ratio),
+            ])
     else:
         pipeline = Compose([
             LoadImageFromFile(),
+            TopDownAffine(P.use_udp),  # 裁剪出手部区域，并放缩到指定大小
             ToTensor(),
             NormalizeTensor(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            GenerateTarget])
+            GenerateTarget,
+            GenerateSimDR(P.sigma, P.simdr_split_ratio),
+            ])
 
     if not isinstance(cfg.DATASET, (list, tuple)):
         dataset_cfg = [cfg.DATASET]

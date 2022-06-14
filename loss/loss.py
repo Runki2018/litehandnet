@@ -19,7 +19,7 @@ class SRHandNetLoss(nn.Module):
         self.loss_weight = cfg.LOSS.loss_weight
         assert len(self.loss_weight) == self.num_out
 
-    def forward(self, outputs, targets, target_weight):
+    def forward(self, outputs, meta):
         """
 
         Args:
@@ -30,10 +30,12 @@ class SRHandNetLoss(nn.Module):
         Returns:
             LOSS: scalar 
         """
+        target = meta['target']
+        target_weight = meta['target_weight']
         if self.smoothl1_loss != None:
-            loss, loss_dict = self._forward_with_regionmap(outputs, targets, target_weight)
+            loss, loss_dict = self._forward_with_regionmap(outputs, target, target_weight)
         else:
-            loss, loss_dict = self._forward_only_heatmap(outputs, targets, target_weight)
+            loss, loss_dict = self._forward_only_heatmap(outputs, target, target_weight)
         return loss, loss_dict
         
     def _forward_with_regionmap(self, outputs, targets, target_weight):
@@ -67,15 +69,20 @@ class SRHandNetLoss(nn.Module):
         return loss, loss_dict
 
 
-class MultiTaskLoss(nn.Module):
+class TopdownHeatmapLoss(nn.Module):
     """
         MTL多任务学习,自动权重调节: https://zhuanlan.zhihu.com/p/367881339
     """
+
     def __init__(self, cfg):
         super().__init__()
-        self.criterion = DistanceLoss(loss_type='L2', reduction='mean')
-        # self.smoothl1_loss = JointsDistanceLoss(use_target_weight=True,
-        #                                         loss_type='smoothl1')
+        self.heatmap_loss = DistanceLoss(loss_type='L2', reduction='mean')
+        if cfg.PIPELINE.simdr_split_ratio > 0:
+             # TODO:将这个参数也放入优化器的参数优化列表中
+            self.simdr_loss = SimDRLoss(cfg)
+        else:
+            self.simdr_loss = None
+
         self.loss_weight = cfg.LOSS.loss_weight
         self.auto_weight = cfg.LOSS.auto_weight
         if self.auto_weight:
@@ -83,16 +90,26 @@ class MultiTaskLoss(nn.Module):
             # TODO:将这个参数也放入优化器的参数优化列表中
             self.p = nn.Parameter(params, requires_grad=True)
 
-    def forward(self, output, target, target_weight):
+    def forward(self, output, meta):
+        loss_dict = {}
         device = output.device
-        # print(f"{output.shape=}")
-        # print(f"{target.shape=}")
-        # print(f"{target_weight.shape=}")
-        kpt_loss = self.criterion(output, target.to(device),
-                                target_weight.to(device)) * self.loss_weight[0]
+        
+        target = meta['target'].to(device)
+        target_weight = meta['target_weight'].to(device)
+        loss_dict['heatmap'] = self.loss_weight[0] * \
+            self.heatmap_loss(output, target, target_weight)
 
-        loss_dict = dict(kpt_loss=kpt_loss.item())
-        return kpt_loss, loss_dict
+        if self.simdr_loss != None:
+            simdr_x = meta['simdr_x'].to(device)
+            simdr_y = meta['simdr_y'].to(device)
+            loss_dict['simdr'] = self.loss_weight[1] * \
+                self.simdr_loss(output, simdr_x, simdr_y, target_weight)
+
+        loss = 0
+        for k, v in loss_dict.items():
+            loss += v
+            loss_dict[k] = v.item()
+        return loss, loss_dict
 
     # def forward(self, output, target, target_weight):
     #     kpt_loss, wh_loss = 0, 0

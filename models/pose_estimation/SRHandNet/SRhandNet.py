@@ -83,7 +83,7 @@ class SRHandNet(nn.Module):
         super().__init__()
         out_c = cfg.MODEL.get('output_channel', 24)
         self.stem = Stem()
-        
+
         self.block1 = nn.Sequential(
             BasicBlock(63, 128, stride=2),
             BasicBlock(128, 128)
@@ -100,25 +100,25 @@ class SRHandNet(nn.Module):
             BasicBlock(512, 256),
             BasicBlock(256, 128),
             nn.Conv2d(128, out_c, 1, 1, 0),         # OUT 1
-            nn.ReLU()
+            # nn.ReLU()
         )
         self.block5 =nn.Sequential(
             BasicBlock(512+out_c, 256),
             BasicBlock(256, 128),
             nn.Conv2d(128, out_c, 1, 1, 0),         # OUT 2  => upsample 
-            nn.ReLU()
+            # nn.ReLU()
         )
         self.block6 =nn.Sequential(
             BasicBlock(256+out_c, 256),
             BasicBlock(256, 128),
             nn.Conv2d(128, out_c, 1, 1, 0),         # OUT 3  => upsample
-            nn.ReLU()
+            # nn.ReLU()
         )
         self.block7 =nn.Sequential(
             BasicBlock(128+out_c, 128),
             BasicBlock(128, 128),
             nn.Conv2d(128, out_c, 1, 1, 0),         # OUT 4
-            nn.ReLU()
+            # nn.ReLU()   # 模型难以收敛可能是ReLU导致模型失活
         )
         self.init_weights()
 
@@ -134,7 +134,7 @@ class SRHandNet(nn.Module):
         b6_up = F.interpolate(b6, scale_factor=2)
         b7 = self.block7(torch.cat([b1, b6_up], dim=1))
         return (b4, b5, b6, b7)
-    
+
     def init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):

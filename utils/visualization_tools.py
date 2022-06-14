@@ -139,7 +139,6 @@ def draw_point(img, keypoints, is_rgb=True):
 
 def draw_text(img, text, bbox, color=(0, 0, 255)):
     """
-
         :param img: cv2 image
         :param text: the text you draw beside the bbox
         :param bbox: the coordinate list [x1,y1,x2,y2], which is the LT/RB point of bbox

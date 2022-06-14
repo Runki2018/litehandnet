@@ -1,7 +1,3 @@
-from cv2 import fastNlMeansDenoisingColored
-
-from train.topdown_trainer import warmup
-
 # w128 UDP
 cfg = dict(
     ID=3,
@@ -50,9 +46,12 @@ cfg = dict(
         encoding='UDP',                 # !MSRA | UDP
         unbiased_encoding=False,         # DARK中的编码方法，在MSRA生成热图时用到，整张热图都生成高斯值
         target_type='GaussianHeatmap',   # 用到不到，默认Gaussian就好
+        simdr_split_ratio=0              # (int) simdr表征的放大倍率。 0, 1, 2, 3, 表示不使用Simdr
     ),
 
-    CHECKPOINT=dict(interval=10, resume=False, load_best=True, save_root='checkpoints/'),
+    CHECKPOINT=dict(interval=10, resume=False,
+                    load_best=True, save_root='checkpoints/'),
+
     EVAL=dict(interval=1,
               metric=['PCK', 'AUC'],
               save_best='PCK',
@@ -73,7 +72,7 @@ cfg = dict(
     OPTIMIZER=dict(type='Adam', lr=5e-4, warmup_steps=100),
 
     LOSS=dict(
-        type='MultiTaskLoss',
+        type='TopdownHeatmapLoss',
         loss_weight=[1.],   # 四个输出的权重
         auto_weight=False,
         with_simdr=False,  # (int => 0, 1, 2) 0表示不使用，1表示编码宽高为原图一倍大小

@@ -1,7 +1,6 @@
 import torch
 import argparse
 from tqdm import tqdm
-from dist_train import main
 from config import get_config
 from models import get_model
 from utils.misc import get_checkpoint_path, get_output_path, get_pickle_path
@@ -41,6 +40,10 @@ def get_argument():
     opt = parser.parse_args()
     return opt
 
+def print_metric(name_dict):
+    for k, v in name_dict.items():
+        print(f'=> {k:5}:{v:.4f}')
+
 def test():
     """
         # 一机多卡训练
@@ -70,9 +73,11 @@ def test():
     if checkpoint_file.exists():
         # reload the last checkpoint
         save_dict = torch.load(checkpoint_file, map_location=torch.device('cpu'))
+        epoch = save_dict['epoch']
         state_dict = save_dict['state_dict']
         state_dict, is_match = load_pretrained_state(model.state_dict(), state_dict)
-        print(f"reload model => {checkpoint_file}\n {is_match=}")
+        print(f"reload model => {checkpoint_file}\n=> {epoch=}\t{is_match=}")
+        assert is_match, "model pth not match the code of current model!"
         model.load_state_dict(state_dict)
     else:
         raise ValueError(f"model not exist! {checkpoint_file}")
@@ -84,23 +89,37 @@ def test():
     test_loader = tqdm(test_loader, desc="testing ...") 
     model.eval()
     results = []
+    simdr_results = []
     for meta in test_loader:
         img = meta['img']
         outputs = model(img.to(device))
         if cfg.MODEL.name.lower() == 'srhandnet':
             outputs = outputs[-1]
 
+        # outputs = meta['target']  # 测试GT标签是否能取得100%性能
         results.append(result_decoder.decode(meta, outputs))
-        # results.append(result_decoder.decode(meta, meta['target']))
 
-    name_value = test_set.evaluate(results, output_path, ['PCK', 'AUC'])
+        if result_decoder.k > 0:  # with simdr == True
+            simdr_results.append(result_decoder.decode_simdr(meta, outputs))
+
+    name_value = test_set.evaluate(results, output_path, ['PCK', 'AUC', 'EPE'])
     print(f"{len(results)=}")
-    print(f"{name_value=}")
+    print(f"Heatmap:")
+    print_metric(name_value)
+    
+    if result_decoder.k > 0:  # with simdr == True
+        name_value = test_set.evaluate(simdr_results, output_path, ['PCK', 'AUC'])
+        print(f"{len(results)=}")
+        print(f"SimDR:")
+        print_metric(name_value)
+        vis_tools.save_images_with_joints(meta['img'], simdr_results[-1]['preds'],
+                                    meta['joints_3d_visible'], 'gt_simdr_joints.jpg')
+    
     if cfg.MODEL.name.lower() == 'srhandnet':
         target = meta['target'][-1]
     else:
         target = meta['target']
-        
+
     vis_tools.save_images_with_joints(meta['img'], meta['joints_3d'],
                                       meta['joints_3d_visible'], 'gt_joints.jpg')
     vis_tools.save_images_with_joints(meta['img'], results[-1]['preds'],

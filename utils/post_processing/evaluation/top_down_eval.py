@@ -5,6 +5,10 @@ import cv2
 import numpy as np
 from datasets.data_pipeline.post_transforms import transform_preds
 
+
+
+
+
 def _calc_distances(preds, targets, mask, normalize):
     """Calculate the normalized distances between preds and target.
 
@@ -56,6 +60,70 @@ def _distance_acc(distances, thr=0.5):
     if num_distance_valid > 0:
         return (distances[distance_valid] < thr).sum() / num_distance_valid
     return -1
+
+
+def keypoint_pck_accuracy(pred, gt, mask, thr, normalize):
+    """Calculate the pose accuracy of PCK for each individual keypoint and the
+    averaged accuracy across all keypoints for coordinates.
+
+    Note:
+        PCK metric measures accuracy of the localization of the body joints.
+        The distances between predicted positions and the ground-truth ones
+        are typically normalized by the bounding box size.
+        The threshold (thr) of the normalized distance is commonly set
+        as 0.05, 0.1 or 0.2 etc.
+
+        - batch_size: N
+        - num_keypoints: K
+
+    Args:
+        pred (np.ndarray[N, K, 2]): Predicted keypoint location.
+        gt (np.ndarray[N, K, 2]): Groundtruth keypoint location.
+        mask (np.ndarray[N, K]): Visibility of the target. False for invisible
+            joints, and True for visible. Invisible joints will be ignored for
+            accuracy calculation.
+        thr (float): Threshold of PCK calculation.
+        normalize (np.ndarray[N, 2]): Normalization factor for H&W.
+
+    Returns:
+        tuple: A tuple containing keypoint accuracy.
+
+        - acc (np.ndarray[K]): Accuracy of each keypoint.
+        - avg_acc (float): Averaged accuracy across all keypoints.
+        - cnt (int): Number of valid keypoints.
+    """
+    distances = _calc_distances(pred, gt, mask, normalize)
+
+    acc = np.array([_distance_acc(d, thr) for d in distances])
+    valid_acc = acc[acc >= 0]
+    cnt = len(valid_acc)
+    avg_acc = valid_acc.mean() if cnt > 0 else 0
+    return acc, avg_acc, cnt
+
+
+def keypoint_epe(pred, gt, mask):
+    """Calculate the end-point error.
+
+    Note:
+        - batch_size: N
+        - num_keypoints: K
+
+    Args:
+        pred (np.ndarray[N, K, 2]): Predicted keypoint location.
+        gt (np.ndarray[N, K, 2]): Groundtruth keypoint location.
+        mask (np.ndarray[N, K]): Visibility of the target. False for invisible
+            joints, and True for visible. Invisible joints will be ignored for
+            accuracy calculation.
+
+    Returns:
+        float: Average end-point error.
+    """
+
+    distances = _calc_distances(
+        pred, gt, mask,
+        np.ones((pred.shape[0], pred.shape[2]), dtype=np.float32))
+    distance_valid = distances[distances != -1]
+    return distance_valid.sum() / max(1, len(distance_valid))
 
 
 def keypoint_pck_accuracy(pred, gt, mask, thr, normalize):
@@ -386,3 +454,41 @@ def keypoints_from_heatmaps(heatmaps,
             preds[i], center[i], scale[i], [W, H], use_udp=use_udp)
 
     return preds, maxvals
+
+
+def keypoints_from_simdr(x_vectors, y_vectors, center, scale, k=2):
+    """
+        decoder the simdr 1D vectors
+    Args:
+        x_vectors (np.ndarray): [Batch, Num_joints, img_W * k]
+        y_vectors (np.ndarray): [Batch, Num_joints, img_H * k]
+        center (np.ndarray[N, 2]): Center of the bounding box (x, y).
+        scale (np.ndarray[N, 2]): Scale of the bounding box wrt height/width.
+        k (int, optional): simdr split ratio. Defaults to 2.
+
+    Returns:
+        keypoints: [Batch, Num_joints, 3]
+    """
+    assert k > 0, f"Error: {k=}"
+    batch, num_joints, W = x_vectors.shape
+    H = y_vectors.shape[2]
+    preds = np.zeros((batch, num_joints, 2), dtype=np.float32)
+    scores = np.zeros((batch, num_joints, 1), dtype=np.float32)
+    
+    for i in range(batch):
+        x_max_idx = x_vectors[i].argmax(axis=1).reshape((-1, 1))
+        x_max_val = x_vectors[i].max(axis=1).reshape((-1, 1))
+
+        y_max_idx = y_vectors[i].argmax(axis=1).reshape((-1, 1))
+        y_max_val = y_vectors[i].max(axis=1).reshape((-1, 1))
+
+        preds[i] = np.concatenate([x_max_idx, y_max_idx], axis=1) / k
+        scores[i] = (x_max_val + y_max_val) / 2
+
+    # Transform back to the image
+    for i in range(batch):
+        preds[i] = transform_preds(
+            preds[i], center[i], scale[i], [W // k, H // k], use_udp=False)
+
+    return np.concatenate([preds, scores], axis=2)
+

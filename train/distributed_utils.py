@@ -1,5 +1,4 @@
-import os
-
+import os, cv2
 import torch
 import torch.distributed as dist
 from utils.training_kits import set_seeds
@@ -29,6 +28,9 @@ def init_distributed_mode(args):
         args.rank, args.dist_url), flush=True)
     dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
                             world_size=args.world_size, rank=args.rank)
+    
+    # Prevent OpenCV from multithreading (to use PyTorch DataLoader)
+    cv2.setNumThreads(0)
     dist.barrier()  # 阻塞，等待所有GPU处理完上面一步
     
 

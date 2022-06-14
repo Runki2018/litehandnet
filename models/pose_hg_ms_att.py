@@ -68,7 +68,7 @@ class Residual(nn.Module):
         super().__init__()
         self.conv1 = BasicBlock(inp_dim, out_dim, stride)
         self.blocks = nn.Sequential(*[BottleNeck(out_dim) for _ in range(num_block)])
-        
+
     def forward(self, x):
         out = self.conv1(x)
         out = self.blocks(out)
@@ -109,7 +109,7 @@ class EncoderDecoder(nn.Module):
     def forward(self, x):
         out_encoder = []   # [128, 64, 32, 16, 8, 4]
         out_decoder = []   # [4, 8, 16, 32, 64, 128]
-        
+
         # encoder 
         for encoder_layer in self.encoder:
             x = encoder_layer(x)
@@ -131,7 +131,6 @@ class EncoderDecoder(nn.Module):
                 x = F.interpolate(x, size=(h, w))
                 x = x + counterpart
             out_decoder.append(x)
-         
         return tuple(out_decoder) 
 
 
@@ -215,7 +214,6 @@ class my_pelee_stem(nn.Module):
         self.branch2 = nn.MaxPool2d(2, 2, ceil_mode=True)
         self.conv1x1 = nn.Conv2d(mid_channel * 2, out_channel, 1, 1, 0)
 
-
     def forward(self, x):
         out = self.conv1(x)
         b1 = self.branch1(out)
@@ -232,26 +230,20 @@ class MultiScaleAttentionHourglass(nn.Module):
         inp_dim=cfg.MODEL.get('input_channel', 128)
         oup_dim=cfg.MODEL.get('output_channel', cfg.DATASET.num_joints)
         num_block=cfg.MODEL.get('num_block', [2, 2, 2, 2])
-        self.pre = my_pelee_stem(inp_dim)
+        self.with_activation = cfg.MODEL.get('output_acitivation', False)
 
-        self.hgs = nn.Sequential(
-            EncoderDecoder(num_stage, inp_dim, num_block)
-            ) 
+        self.pre = my_pelee_stem(inp_dim)
+        self.hgs = EncoderDecoder(num_stage, inp_dim, num_block) 
 
         self.features = nn.Sequential(
                 BottleNeck(inp_dim),
+                nn.Conv2d(inp_dim, inp_dim, 1, 1, 0),
                 nn.BatchNorm2d(inp_dim),
-                nn.ReLU(),
-                nn.Conv2d(inp_dim, inp_dim, 1, 1, 0)
+                nn.LeakyReLU(),
             )
 
+        # self.out_layer = nn.Conv2d(inp_dim, oup_dim, 1, 1, 0)
         self.outs = nn.Conv2d(inp_dim, oup_dim, 1, 1, 0)
-      
-        # self.image_size = cfg['image_size']  # (w, h)
-        # k = cfg['simdr_split_ratio']  # default k = 2 
-        # in_features = int(self.image_size[0] * self.image_size[1] / (4 ** 2))  # 下采样率是4，所以除以16  
-        # self.pred_x = nn.Linear(in_features, int(self.image_size[0] * k)) 
-        # self.pred_y = nn.Linear(in_features, int(self.image_size[1] * k))
 
     def forward(self, imgs):
         # our posenet
@@ -260,13 +252,6 @@ class MultiScaleAttentionHourglass(nn.Module):
         feature = self.features(hg[-1])
         preds = self.outs(feature)
 
-        # predict keypoints
-        # kpts = hm_preds[-1][:, 3:]
-        # # if imgs.shape[-1] != self.image_size[0]:
-        # #     kpts = F.interpolate(kpts , scale_factor=2, mode='nearest')
-        # kpts = rearrange(kpts, 'b c h w -> b c (h w)')
-        # pred_x = self.pred_x(kpts)  # (b, c, w * k)
-        # pred_y = self.pred_y(kpts)  # (b, c, h * k)   
-        # return hm_preds, pred_x, pred_y
+        if self.with_activation:  # 加快模型收敛
+            preds = F.leaky_relu(preds, 0.5)
         return preds
-

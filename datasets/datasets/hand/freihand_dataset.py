@@ -8,7 +8,7 @@ from datasets.base_dataset import Kpt2dDataset
 from datasets.dataset_info.dataset_configs import freihand2d_info
 
 class FreiHandDataset(Kpt2dDataset):
-    """FreiHand dataset for top-down hand pose estimation.
+    """FreiHand dataset for top-down 2D hand pose estimation.
 
     "FreiHAND: A Dataset for Markerless Capture of Hand Pose
     and Shape from Single RGB Images", ICCV'2019.

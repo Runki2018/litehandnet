@@ -222,8 +222,7 @@ class MultiScaleAttentionHourglass(nn.Module):
         self.merge_preds = nn.ModuleList([
                 nn.Conv2d(oup_dim, inp_dim, 1, 1, 0)
             for _ in range(self.nstack - 1)])
-        
-        
+
         k = cfg['simdr_split_ratio']  # default k = 2 
         self.with_simdr = k > 0
         if self.with_simdr:
@@ -231,9 +230,8 @@ class MultiScaleAttentionHourglass(nn.Module):
             in_features = int(self.image_size[0] * self.image_size[1] / (4 ** 2))  # 下采样率是4，所以除以16  
             self.pred_x = nn.Linear(in_features, int(self.image_size[0] * k)) 
             self.pred_y = nn.Linear(in_features, int(self.image_size[1] * k))
-        
         self.init_weights()
-        
+
     def forward(self, imgs):
         # our posenet
         x = self.pre(imgs)
@@ -260,7 +258,7 @@ class MultiScaleAttentionHourglass(nn.Module):
             return hm_preds, pred_x, pred_y
         else:
             return hm_preds
-        
+
     def init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):

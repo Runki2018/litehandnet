@@ -42,9 +42,11 @@ cfg = dict(
         encoding='MSRA',                 # MSRA | UDP
         unbiased_encoding=False,         # DARK中的编码方法， 在MSRA生成热图时用到，整张热图都生成高斯值
         target_type='GaussianHeatmap',   # 用到不到，默认Gaussian就好
+        # (int) simdr表征的放大倍率。 0, 1, 2, 3, 表示不使用Simdr
+        simdr_split_ratio=0,             
     ),
 
-    CHECKPOINT=dict(interval=10, resume=True, load_best=False, save_root='checkpoints/'),
+    CHECKPOINT=dict(interval=10, resume=False, load_best=False, save_root='checkpoints/'),
     EVAL=dict(interval=1,
               metric=['PCK', 'AUC'],
               save_best='PCK',
@@ -62,12 +64,12 @@ cfg = dict(
     ),
 
     # 'Adam', 'SGD'
-    OPTIMIZER=dict(type='SGD', lr=2e-5, warmup_steps=200),
+    # OPTIMIZER=dict(type='SGD', lr=2e-5, warmup_steps=200),
+    OPTIMIZER=dict(type='Adam', lr=1e-4, warmup_steps=200),
 
     LOSS=dict(
         type='srhandnetloss',
         auto_weight=False,
-        with_simdr=False,  # (int => 0, 1, 2) 0表示不使用，1表示编码宽高为原图一倍大小
         loss_weight=[0.3, 0.3, 0.5, 1.0]   # 四个输出的权重
     )
 )

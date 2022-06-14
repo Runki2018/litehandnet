@@ -27,6 +27,7 @@ class SaveResultImages:
                 jointa = joints[a]
                 jointb = joints[b]
                 if jointa[2] > 0 and jointb[2] > 0:
+                    color = tuple([int(c) for c in color])
                     cv2.line(
                         image,
                         (int(jointa[0]), int(jointa[1])),
@@ -37,8 +38,9 @@ class SaveResultImages:
         # add joints
         for i in range(num_joints):
             if joints[i, 2] > 0:
-                cv2.circle(image, (int(joints[i, 0]), int(joints[i, 1])), 
-                           1, self.pose_kpt_color[i], 2)
+                center = (int(joints[i, 0]), int(joints[i, 1]))
+                color = tuple([int(c) for c in self.pose_kpt_color[i]])
+                cv2.circle(image, center, 2, color, 2)
         
         # add link
         for i, pair in enumerate(self.pose_skeleton):
@@ -67,7 +69,7 @@ class SaveResultImages:
 
 
     def save_images_with_joints(self, batch_image, batch_joints, batch_joints_vis,
-                                     file_name, nrow=8, padding=2):
+                                     file_name, nrow=8, padding=2, just_points=False):
         '''
             batch_image: [batch_size, channel, height, width]
             batch_joints: [batch_size, num_joints, 3],
@@ -75,35 +77,41 @@ class SaveResultImages:
             file_name: eg. 'epoch1.jpg'
         '''
         grid = torchvision.utils.make_grid(batch_image, nrow, padding, True)
-        ndarr = grid.mul(255).clamp(0, 255).byte().permute(1, 2, 0).cpu().numpy()
-        ndarr = cv2.cvtColor(ndarr, cv2.COLOR_RGB2BGR)
+        img_ndarr = grid.mul(255).clamp(0, 255).byte().permute(1, 2, 0).cpu().numpy()
+        img_ndarr = cv2.cvtColor(img_ndarr, cv2.COLOR_RGB2BGR)
 
         nmaps = batch_image.size(0)
         xmaps = min(nrow, nmaps)
         ymaps = int(math.ceil(float(nmaps) / xmaps))
         height = int(batch_image.size(2) + padding)
         width = int(batch_image.size(3) + padding)
-        k = 0
+        k = 0  # 当前图片的序号
         for y in range(ymaps):
             for x in range(xmaps):
                 if k >= nmaps:
                     break
                 joints = batch_joints[k]
                 joints_vis = batch_joints_vis[k]
+                # 加上每张图片的偏移量
+                joints[:, :2] += np.array([x * width + padding, y * height + padding])
 
-                for joint, joint_vis in zip(joints, joints_vis):
-                    joint[0] = x * width + padding + joint[0]
-                    joint[1] = y * height + padding + joint[1]
-                    if joint_vis[0]:
-                        cv2.circle(
-                            ndarr,
-                            (int(joint[0]), int(joint[1])),
-                            2,
-                            [255, 0, 0],
-                            2
-                        )
+                if not just_points:
+                    joints[:, 2] = joints_vis[:, 0]
+                    img_ndarr = self._add_joints(img_ndarr, joints)
+                else:
+                    for joint, joint_vis in zip(joints, joints_vis):
+                        # joint[0] = x * width + padding + joint[0]
+                        # joint[1] = y * height + padding + joint[1]
+                        if joint_vis[0]:
+                            cv2.circle(
+                                img_ndarr,
+                                (int(joint[0]), int(joint[1])),
+                                2,
+                                [255, 0, 0],
+                                2
+                            )
                 k = k + 1
-        cv2.imwrite(str(self.output_path.joinpath(file_name)), ndarr)
+        cv2.imwrite(str(self.output_path.joinpath(file_name)), img_ndarr)
         
     def save_images_with_heatmap(self, batch_image, batch_heatmap, file_name, padding=2):
         '''

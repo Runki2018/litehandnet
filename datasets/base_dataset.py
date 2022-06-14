@@ -8,7 +8,8 @@ from torch.utils.data import Dataset
 from abc import ABCMeta, abstractmethod
 
 from .dataset_info.dataset_info import DatasetInfo
-from utils.post_processing.evaluation.top_down_eval import keypoint_auc,keypoint_pck_accuracy
+from utils.post_processing.evaluation.top_down_eval import (keypoint_auc,
+                                                            keypoint_pck_accuracy, keypoint_epe)
 
 
 class Kpt2dDataset(Dataset, metaclass=ABCMeta):
@@ -140,8 +141,7 @@ class Kpt2dDataset(Dataset, metaclass=ABCMeta):
             center (np.ndarray[float32](2,)): center of the bbox (x, y).
             scale (np.ndarray[float32](2,)): scale of the bbox w & h.
         """
-        aspect_ratio = \
-            self.ann_info.image_size[0] / self.ann_info.image_size[1]
+        aspect_ratio = self.ann_info.image_size[0] / self.ann_info.image_size[1]
         center = np.array([x + w * 0.5, y + h * 0.5], dtype=np.float32)
 
         # ! 在测试时，需要self.test_mode == True, 否则算出来的评价指标不准确
@@ -255,6 +255,9 @@ class Kpt2dDataset(Dataset, metaclass=ABCMeta):
 
         if 'AUC' in metrics:
             info_str.append(('AUC', keypoint_auc(outputs, gts, masks, auc_nor)))
+            
+        if 'EPE' in metrics:
+            info_str.append(('EPE', keypoint_epe(outputs, gts, masks)))
         return info_str
 
 

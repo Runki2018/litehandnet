@@ -57,10 +57,10 @@ class TopDownAffine:
             Paper ref: Huang et al. The Devil is in the Details: Delving into
             Unbiased Data Processing for Human Pose Estimation (CVPR 2020).
     """
-    
+
     def __init__(self, use_udp=False):
         self.use_udp = use_udp
-        
+
     def __call__(self, results):
         image_size = results['ann_info']['image_size']
         
@@ -70,7 +70,7 @@ class TopDownAffine:
         c = results['center']
         s = results['scale']
         r = results['rotation']
-        
+
         if self.use_udp:  # 使用无偏数据处理
             # 获取放射变换矩阵
             trans = get_warp_matrix(r, c * 2.0, image_size - 1.0, s * 200.0)
@@ -79,8 +79,7 @@ class TopDownAffine:
                 img = cv2.warpAffine(
                     img,
                     trans, (int(image_size[0]), int(image_size[1])),
-                    flags=cv2.INTER_LINEAR,
-                )
+                    flags=cv2.INTER_LINEAR)
             else:
                 img = [
                     cv2.warpAffine(
@@ -113,10 +112,4 @@ class TopDownAffine:
         results['img'] = img
         results['joints_3d'] = joints_3d
         results['joints_3d_visible'] = joints_3d_visible
-        
         return results
-            
-            
-
-            
-        

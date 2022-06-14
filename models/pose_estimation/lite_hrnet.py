@@ -241,12 +241,9 @@ class IterativeHead(nn.Module):
 
 class LiteHRNet(nn.Module):
     # def __init__(self, cfg):
-    def __init__(self):
+    def __init__(self, cfg):
         super().__init__()
-        # out_channel= cfg['n_joints'] 
-        # out_channel = out_channel + 3 if cfg['with_region_map'] else out_channel
-        out_channel= 21
-        out_channel = out_channel + 3 
+        out_channel= cfg.MODEL.get('output_channel', cfg.DATASET.num_joints)
 
         self.stem = StemModule(
             in_channels=3, stem_channels=32, 
@@ -282,7 +279,7 @@ class LiteHRNet(nn.Module):
         self.out_conv = nn.Conv2d(40, out_channel, 1, 1, 0)  # 需要自己加一个检测头
     
     def _make_transition_layer(self, num_channels_pre_layer, num_channels_cur_layer):
-        """将上一个stage的输出进行处理得到下一个stage的输入， 对于同一层次，如果通道数不同则变通道，如果为新层次，则下采样"""
+        """将上一个stage的输出进行处理得到下一个stage的输入, 对于同一层次，如果通道数不同则变通道，如果为新层次，则下采样"""
         num_branches_cur = len(num_channels_cur_layer)
         num_branches_pre = len(num_channels_pre_layer)  # 前一个stage通道数
 
@@ -337,13 +334,13 @@ class LiteHRNet(nn.Module):
                 else:
                     x_list.append(y_list[j])
             y_list = getattr(self, f'stage{i}')(x_list)
-        
+
         x = y_list
         if self.with_head:
             x = self.head_layer(x)
         # return [x[0]]
         out = self.out_conv(x[0])
-        return [out]
+        return out
 
 
 

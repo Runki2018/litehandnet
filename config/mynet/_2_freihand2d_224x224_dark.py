@@ -1,14 +1,10 @@
-from cv2 import fastNlMeansDenoisingColored
-
-from train.topdown_trainer import warmup
-
 # w128 MSRA_DARK
 cfg = dict(
     ID=2,
     MODEL=dict(
         name='mynet',
-        input_channel=128,  # num_joints + 3 region map
-        output_channel=21,  # num_joints + 3 region map
+        input_channel=128,       # num_joints + 3 region map
+        output_channel=21,       # num_joints + 3 region map
         num_stage=4,
         num_block=[2, 2, 2],
         pred_bbox=True,          # 模型是否预测边界框, 是则不进行旋转变换
@@ -50,9 +46,10 @@ cfg = dict(
         encoding='MSRA',                 # MSRA | UDP
         unbiased_encoding=True,         # !DARK中的编码方法，在MSRA生成热图时用到，整张热图都生成高斯值
         target_type='GaussianHeatmap',   # 用到不到，默认Gaussian就好
+        simdr_split_ratio=0              # (int) simdr表征的放大倍率。 0, 1, 2, 3, 表示不使用Simdr
     ),
 
-    CHECKPOINT=dict(interval=10, resume=False, load_best=True, save_root='checkpoints/'),
+    CHECKPOINT=dict(interval=10, resume=True, load_best=True, save_root='checkpoints/'),
     EVAL=dict(interval=1,
               metric=['PCK', 'AUC'],
               save_best='PCK',
@@ -73,7 +70,7 @@ cfg = dict(
     OPTIMIZER=dict(type='Adam', lr=5e-4, warmup_steps=100),
 
     LOSS=dict(
-        type='MultiTaskLoss',
+        type='TopdownHeatmapLoss',
         loss_weight=[1.],   # 四个输出的权重
         auto_weight=False,
         with_simdr=False,  # (int => 0, 1, 2) 0表示不使用，1表示编码宽高为原图一倍大小
