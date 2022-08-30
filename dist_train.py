@@ -1,13 +1,6 @@
-# from data import get_dataset
-# import data
-# from loss.loss import MultiTaskLoss as Loss
-# from utils.result_parser import ResultParser
-# ---------------------------------------------
-
 import os
 import torch
 import argparse
-from copy import deepcopy
 from shutil import copy2
 from tqdm import tqdm
 from datetime import datetime
@@ -85,13 +78,13 @@ def main(gpu, cfg, args):
         )
 
     # 定义参数
-    exp_name = str(cfg.ID) + cfg.DATASET.name + '_' + cfg.MODEL.name  # experiment name
+    # exp_name = str(cfg.ID) + cfg.DATASET.name + '_' + cfg.MODEL.name  # experiment name
+    exp_name = str(cfg.ID) + '_' + cfg.DATASET.name + '_' + cfg.MODEL.name  # experiment name
 
     begin_epoch = 0  # 开始的epoch
     min_val_loss = 1e6
     end_epoch = cfg.TRAIN.total_epoches  # 训练结束的epoch
     output_path = get_output_path(cfg, args.cfg)
-    
 
     # load checkpoint
     checkpoint_file = get_checkpoint_path(cfg, output_path)
@@ -106,8 +99,10 @@ def main(gpu, cfg, args):
 
         min_val_loss = save_dict.get('min_val_loss', 1e6)
         if is_match:
-            begin_epoch = save_dict.get('epoch', 0)
-            if save_dict['config'].OPTIMIZER.type == cfg.OPTIMIZER.type:
+            if cfg.OPTIMIZER.get('resume', True) and \
+                save_dict['config'].OPTIMIZER.type == cfg.OPTIMIZER.type:
+
+                begin_epoch = save_dict.get('epoch', 0)
                 optimizer.load_state_dict(save_dict["optimizer"])
                 for state_dict in optimizer.state.values():
                     # optimizer加载参数时,tensor默认在CPU上
@@ -126,9 +121,11 @@ def main(gpu, cfg, args):
         # 这里注意，一定要指定map_location参数，否则会导致第一块GPU占用更多资源
         load_dict = torch.load(temp_file, map_location=torch.device('cpu'))
         state_dict = load_dict.get('state_dict', load_dict)
+        state_dict, is_match = load_pretrained_state(model.state_dict(), state_dict)
+        if args.rank == 0:
+            print(f"reload checkpoint and {is_match=}")
         model.load_state_dict(state_dict)
 
-    
     scheduler = get_scheduler(cfg, optimizer, args.FP16_ENABLED, begin_epoch)
 
     if args.rank == 0:  # 在第一个进程中打印信息，并实例化tensorboard
@@ -209,7 +206,7 @@ def main(gpu, cfg, args):
                 writer.add_scalars("val_loss", val_loss_dict, epoch)
                 writer.add_scalar("lr", lr, epoch)   
 
-                if min_val_loss > val_loss_dict['sum']: 
+                if min_val_loss >= val_loss_dict['sum']: 
                     min_val_loss = val_loss_dict['sum']
                     # 记录训练数据
                     save_dict = {

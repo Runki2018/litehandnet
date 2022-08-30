@@ -3,7 +3,7 @@ cfg = dict(
     MODEL=dict(
         name='srhandnet',
         output_channel=21,  # num_joints + 3 region map
-        pred_bbox=False,          # 模型是否预测边界框, 是则不进行旋转变换
+        pred_bbox=False,     # 模型是否预测边界框, 是则不进行旋转变换, 以及不生成region map
         ),
 
     DATASET=dict(
@@ -37,7 +37,7 @@ cfg = dict(
         # TopDownAffine
         use_udp=False,                   # 无偏数据处理
         # TopDownGenerateTarget
-        sigma=[3, 3, 3, 3],              # 根据SRHandNet的训练配置
+        sigma=[2, 2, 2, 2],              # 根据SRHandNet的训练配置
         kernel=(11, 11),                 # MSRA unbias编码时用到，sigma=2 => kernel=11
         encoding='MSRA',                 # MSRA | UDP
         unbiased_encoding=False,         # DARK中的编码方法， 在MSRA生成热图时用到，整张热图都生成高斯值
@@ -48,23 +48,23 @@ cfg = dict(
 
     CHECKPOINT=dict(interval=10, resume=False, load_best=False, save_root='checkpoints/'),
     EVAL=dict(interval=1,
-              metric=['PCK', 'AUC'],
+              metric=['PCK', 'AUC', 'EPE'],
               save_best='PCK',
               pck_threshold=0.2),
 
     TRAIN=dict(
         distributed=True,
-        pin_memory=True,
+        pin_memory=False,
         CUDA_VISIBLE_DEVICES="0,1,2,3",
         find_unused_parameters=False,
-        workers=4,
+        workers=1,
         syncBN=False,
         total_epoches=210,
-        batch_per_gpu=32,   # batch_size
+        batch_per_gpu=8,   # batch_size
     ),
 
     # 'Adam', 'SGD'
-    OPTIMIZER=dict(type='Adam', lr=1e-4, warmup_steps=200),
+    OPTIMIZER=dict(type='Adam', lr=1e-4, warmup_steps=200, step_epoch=[170, 200]),
 
     LOSS=dict(
         type='srhandnetloss',

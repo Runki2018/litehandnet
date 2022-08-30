@@ -41,9 +41,8 @@ def load_pretrained_state(model_state, pretrained_state, verbose=False):
         for k1 in keys1:
             if k2_s in k1 and model_state[k1].shape == pretrained_state[k2].shape:
                 model_state[k1] = pretrained_state[k2]
-                i +=1
-            elif verbose and k2_s in k1 \
-                and model_state[k1].shape != pretrained_state[k2].shape:
+                i+= 1
+            elif verbose:
                 print(f"{k1=}\t{ model_state[k1].shape}")
                 print(f"{k2=}\t{ pretrained_state[k2].shape}")
                 print('-' * 30)

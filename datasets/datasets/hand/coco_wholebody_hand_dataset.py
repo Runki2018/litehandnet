@@ -55,20 +55,10 @@ class HandCocoWholeBodyDataset(Kpt2dDataset):
             validation dataset. Default: False.
     """
 
-    def __init__(self,
-                 ann_file,
-                 img_prefix,
-                 data_cfg,
-                 pipeline,
-                 test_mode=False):
-        
-        super().__init__(
-            ann_file,
-            img_prefix,
-            data_cfg,
-            pipeline,
-            dataset_info=coco_wholebody_hand_info,
-            test_mode=test_mode)
+    def __init__(self, data_cfg, pipeline, data_type='train'):
+
+        super().__init__(data_cfg, pipeline, data_type,
+                         dataset_info=coco_wholebody_hand_info)
 
         self.ann_info['use_different_joint_weights'] = False
         self.db = self._get_db()
@@ -115,7 +105,7 @@ class HandCocoWholeBodyDataset(Kpt2dDataset):
                             'joints_3d': joints_3d,
                             'joints_3d_visible': joints_3d_visible,
                             'dataset': self.dataset_name,
-                            'bbox': obj[f'{type}hand_box'],
+                            'bbox': np.array(obj[f'{type}hand_box'], np.float32),
                             'bbox_score': 1,
                             'bbox_id': bbox_id
                         })

@@ -226,17 +226,18 @@ class JointsDistanceLoss(nn.Module):
 
 
 class DistanceLoss(nn.Module):
-    def __init__(self, loss_type='L2', reduction='mean'):
+    def __init__(self, loss_type='L2', reduction='mean', balance=True, value=0.5):
         super().__init__()
+        assert reduction in ['mean', 'sum', None], f"Error: {reduction=}"
+        self.reduction = reduction
+        self.value = value
+        self.balance = balance
         if loss_type.lower() == 'l2':
             self.criterion = nn.MSELoss(reduction='none')
         elif loss_type.lower() == 'l1':
             self.criterion = nn.L1Loss(reduction='none')
         else:
             self.criterion = nn.SmoothL1Loss(reduction='none')
-        
-        assert reduction in ['mean', 'sum', None], f"Error: {reduction=}"
-        self.reduction = reduction
 
     def forward(self, output, target, target_weight):
         """
@@ -247,7 +248,16 @@ class DistanceLoss(nn.Module):
         """
         loss = self.criterion(output, target)
         loss *= target_weight.unsqueeze(-1)
-        
+
+        if self.balance:
+            pos = target.gt(self.value)  # mask of positive samples
+            neg = ~pos                   # mask of negative samples
+            pos_factor = loss.numel() / (pos.sum() + 1) * 0.1
+            neg_factor = loss.numel() / (neg.sum() + 1)
+            loss[pos] *= pos_factor
+            loss[neg] *= neg_factor
+            # loss[pos] *= 30 * target[pos]
+
         if self.reduction == 'mean':
             return loss.mean()
         elif self.reduction == 'sum':
@@ -255,21 +265,3 @@ class DistanceLoss(nn.Module):
         return loss
 
 
-if __name__ == '__main__':
-    pass
-    img = torch.zeros((1, 3, 3))
-    img[0, 1, 1] = 0.1
-    img[0, 0, 0] = 0.5
-    hms = torch.stack((img, img), dim=0)
-    hm_gts = torch.zeros_like(hms)
-    hm_gts[:, :, 1, 1] = 1
-
-    # focal_loss = FocalLoss(alpha=2, beta=4)
-    # l = focal_loss(hms, hm_gts)
-    # sl = MaskLoss()
-    sl = RegionLoss()
-    l = sl(hms, hm_gts)
-
-    print(hms)
-    print(hms.shape)
-    print(l)

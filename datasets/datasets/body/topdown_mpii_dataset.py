@@ -53,21 +53,15 @@ class TopDownMpiiDataset(Kpt2dDataset):
     """
 
     def __init__(self,
-                 ann_file,
-                 img_prefix,
                  data_cfg,
                  pipeline,
-                 dataset_info=None,
-                 test_mode=False):
+                 data_type='train'):
 
         super().__init__(
-            ann_file,
-            img_prefix,
             data_cfg,
             pipeline,
-            dataset_info=mpii_info,
-            coco_style=False,
-            test_mode=test_mode)
+            data_type,
+            dataset_info=mpii_info)
 
         self.db = self._get_db()
         self.image_set = set(x['image_file'] for x in self.db)

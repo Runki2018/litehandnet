@@ -2,7 +2,7 @@ cfg = dict(
     ID=1,   # 模型训练配置文件的ID，用于生成输出目录： '/root/dataset/model/ID'
     MODEL=dict(
         name='srhandnet',
-        output_channels=24,  # num_joints + 3 region map
+        output_channel=24,  # num_joints + 3 region map
         pred_bbox=True,          # 模型是否预测边界框, 是则不进行旋转变换
         ),
 
@@ -48,7 +48,7 @@ cfg = dict(
 
     CHECKPOINT=dict(interval=10, resume=False, load_best=False, save_root='checkpoints/'),
     EVAL=dict(interval=1,
-              metric=['PCK', 'AUC'],
+              metric=['PCK', 'AUC', 'EPE'],
               save_best='PCK',
               pck_threshold=0.2),
 
@@ -65,7 +65,7 @@ cfg = dict(
 
     # 'Adam', 'SGD'
     # OPTIMIZER=dict(type='SGD', lr=2e-5, warmup_steps=200),
-    OPTIMIZER=dict(type='Adam', lr=1e-4, warmup_steps=200),
+    OPTIMIZER=dict(type='Adam', lr=1e-4, warmup_steps=200, step_epoch=[170, 200]),
 
     LOSS=dict(
         type='srhandnetloss',

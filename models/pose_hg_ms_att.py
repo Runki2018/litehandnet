@@ -1,8 +1,7 @@
-from turtle import forward
 import torch
 from torch import nn
-from einops import rearrange, repeat
 from torch.nn import functional as F
+from models import kaiming_init, constant_init, normal_init
 
 
 class DWConv(nn.Module):
@@ -22,7 +21,7 @@ class DWConv(nn.Module):
         out = self.mid_relu(self.depthwise_conv(x)) 
         out = self.last_relu(self.pointwise_conv(out)) 
         return out
-
+ 
 class BottleNeck(nn.Module):
     """用于提高深度,但尽可能少地增加运算量, 不改变通道数"""
     def __init__(self, channel):
@@ -81,12 +80,12 @@ class BRC(nn.Module):
         self.inp_dim = inp_dim
         self.conv = nn.Conv2d(inp_dim, out_dim, kernel_size, stride,
                             padding=padding, bias=bias, dilation=dilation)
-        self.relu = nn.ReLU(inplace=True)
+        self.silu = nn.SiLU(inplace=True)
         self.bn = nn.BatchNorm2d(inp_dim)
 
     def forward(self, x):
         x = self.bn(x)
-        x = self.relu(x)
+        x = self.silu(x)
         x = self.conv(x)
         return x
 
@@ -99,13 +98,12 @@ class EncoderDecoder(nn.Module):
         self.decoder = nn.ModuleList([])
         assert len(num_blocks) == num_levels - 1
 
-
         self.encoder.append(ME_att(inp_dim, inp_dim))
         for i in range(num_levels-1):
             self.encoder.append(Residual(inp_dim, inp_dim, 2, num_blocks[i]))
             self.decoder.append(Residual(inp_dim, inp_dim))
         self.decoder.append(ME_att(inp_dim, inp_dim))
-        
+
     def forward(self, x):
         out_encoder = []   # [128, 64, 32, 16, 8, 4]
         out_decoder = []   # [4, 8, 16, 32, 64, 128]
@@ -174,6 +172,7 @@ class ME_att(nn.Module):
                             nn.Linear(out_c, out_c),
                             nn.Sigmoid(),  
                             )
+
     def forward(self, x):
         m = self.conv1(x)
         for i in range(2):
@@ -202,7 +201,7 @@ class my_pelee_stem(nn.Module):
                       groups=mid_channel, bias=False),
             nn.BatchNorm2d(mid_channel),
             nn.LeakyReLU(inplace=True)
-        ) 
+        )
         self.branch1 = nn.Sequential(
             nn.Conv2d(mid_channel, mid_channel, 1, 1, 0),
             nn.BatchNorm2d(mid_channel),
@@ -229,7 +228,7 @@ class MultiScaleAttentionHourglass(nn.Module):
         num_stage=cfg.MODEL.get('num_stage', 4)
         inp_dim=cfg.MODEL.get('input_channel', 128)
         oup_dim=cfg.MODEL.get('output_channel', cfg.DATASET.num_joints)
-        num_block=cfg.MODEL.get('num_block', [2, 2, 2, 2])
+        num_block=cfg.MODEL.get('num_block', [2, 2, 2])
         self.with_activation = cfg.MODEL.get('output_acitivation', False)
 
         self.pre = my_pelee_stem(inp_dim)
@@ -244,6 +243,7 @@ class MultiScaleAttentionHourglass(nn.Module):
 
         # self.out_layer = nn.Conv2d(inp_dim, oup_dim, 1, 1, 0)
         self.outs = nn.Conv2d(inp_dim, oup_dim, 1, 1, 0)
+        self.init_weights()
 
     def forward(self, imgs):
         # our posenet
@@ -255,3 +255,13 @@ class MultiScaleAttentionHourglass(nn.Module):
         if self.with_activation:  # 加快模型收敛
             preds = F.leaky_relu(preds, 0.5)
         return preds
+    
+    def init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                # kaiming_init(m)
+                normal_init(m)
+            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
+                constant_init(m, 1)
+
+    

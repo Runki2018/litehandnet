@@ -3,6 +3,7 @@ from torch import nn
 import math
 import torch.nn.functional as F
 # from thop import profile
+from models import kaiming_init, constant_init
 
 
 def get_SRhandNet(cfg):
@@ -81,7 +82,7 @@ class BasicBlock(nn.Module):
 class SRHandNet(nn.Module):
     def __init__(self, cfg):
         super().__init__()
-        out_c = cfg.MODEL.get('output_channel', 24)
+        out_c = cfg.MODEL.get('output_channel', 21)
         self.stem = Stem()
 
         self.block1 = nn.Sequential(
@@ -138,10 +139,10 @@ class SRHandNet(nn.Module):
     def init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                kaiming_init(m)
             elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
+                constant_init(m, 1)
+
 
 
 if __name__ == '__main__':

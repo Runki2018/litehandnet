@@ -378,7 +378,9 @@ def keypoints_from_heatmaps(heatmaps,
                             post_process='default',
                             kernel=11,
                             use_udp=False,
-                            target_type='GaussianHeatmap'):
+                            target_type='GaussianHeatmap',
+                            only_original_preds=False):
+                            
     """Get final keypoint predictions from heatmaps and transform them back to
     the image.
 
@@ -406,6 +408,7 @@ def keypoints_from_heatmaps(heatmaps,
             (response map) and regression target (offset map).
             Paper ref: Huang et al. The Devil is in the Details: Delving into
             Unbiased Data Processing for Human Pose Estimation (CVPR 2020).
+        original_results(bool): if True, just return the results transformed back to original images
 
     Returns:
         tuple: A tuple containing keypoint predictions and scores.
@@ -423,37 +426,41 @@ def keypoints_from_heatmaps(heatmaps,
     N, K, H, W = heatmaps.shape
     if use_udp:
         if target_type.lower() == 'GaussianHeatMap'.lower():
-            preds, maxvals = _get_max_preds(heatmaps)
-            preds = post_dark_udp(preds, heatmaps, kernel=kernel)
+            hm_preds, maxvals = _get_max_preds(heatmaps)
+            hm_preds = post_dark_udp(hm_preds, heatmaps, kernel=kernel)
     else:
-        preds, maxvals = _get_max_preds(heatmaps)
+        hm_preds, maxvals = _get_max_preds(heatmaps)
         if post_process == 'unbiased':  # alleviate biased coordinate
             # apply Gaussian distribution modulation.
             heatmaps = np.log(
                 np.maximum(_gaussian_blur(heatmaps, kernel), 1e-10))
             for n in range(N):
                 for k in range(K):
-                    preds[n][k] = _taylor(heatmaps[n][k], preds[n][k])
+                    hm_preds[n][k] = _taylor(heatmaps[n][k], hm_preds[n][k])
         elif post_process is not None:
             # add +/-0.25 shift to the predicted locations for higher acc.
             for n in range(N):
                 for k in range(K):
                     heatmap = heatmaps[n][k]
-                    px = int(preds[n][k][0])
-                    py = int(preds[n][k][1])
+                    px = int(hm_preds[n][k][0])
+                    py = int(hm_preds[n][k][1])
                     if 1 < px < W - 1 and 1 < py < H - 1:
                         diff = np.array([
                             heatmap[py][px + 1] - heatmap[py][px - 1],
                             heatmap[py + 1][px] - heatmap[py - 1][px]
                         ])
-                        preds[n][k] += np.sign(diff) * .25
+                        hm_preds[n][k] += np.sign(diff) * .25
 
+    preds = hm_preds.copy()
     # Transform back to the image
     for i in range(N):
-        preds[i] = transform_preds(
+       preds[i] = transform_preds(
             preds[i], center[i], scale[i], [W, H], use_udp=use_udp)
 
-    return preds, maxvals
+    if only_original_preds:
+        return preds, maxvals
+    else:
+        return hm_preds, preds, maxvals
 
 
 def keypoints_from_simdr(x_vectors, y_vectors, center, scale, k=2):

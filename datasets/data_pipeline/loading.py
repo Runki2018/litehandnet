@@ -63,7 +63,7 @@ class LoadImageFromFile:
                 # is manually set outside the pipeline.
                 raise KeyError('Either `image_file` or `img` should exist in '
                                'results.')
-                
+
             assert isinstance(results['img'], np.ndarray)
             if self.color_type == 'color' and self.channel_order == 'rgb':
                 # The original results['img'] is assumed to be image(s) in BGR

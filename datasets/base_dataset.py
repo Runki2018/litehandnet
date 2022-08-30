@@ -194,7 +194,7 @@ class Kpt2dDataset(Dataset, metaclass=ABCMeta):
                        res_file,
                        metrics,
                        pck_thr=0.2,
-                       pckh_thr=0.7,
+                       pckh_thr=0.5,
                        auc_nor=30):
         """Keypoint evaluation.
 
@@ -203,7 +203,7 @@ class Kpt2dDataset(Dataset, metaclass=ABCMeta):
             metrics (str | list[str]): Metric to be performed.
                 Options: 'PCK', 'PCKh', 'AUC'
             pck_thr (float): PCK threshold, default as 0.2.
-            pckh_thr (float): PCKh threshold, default as 0.7.
+            pckh_thr (float): PCKh threshold, default as 0.7(mmpose).
             auc_nor (float): AUC normalization factor, default as 30 pixel.
 
         Returns:

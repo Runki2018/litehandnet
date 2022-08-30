@@ -46,12 +46,13 @@ def warmup(step, warmup_steps, max_lr, device, model, criterion,
     https://blog.csdn.net/qq_42530301/article/details/124546903
     """
     for meta in train_loader: 
-        img = meta['img']
-        if step <= warmup_steps:
-            lr = max_lr * step / warmup_steps
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = lr
-        step += 1
+        with torch.no_grad():
+            img = meta['img']
+            if step <= warmup_steps:
+                lr = max_lr * step / warmup_steps
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] = lr
+            step += 1
 
         outputs = model(img.to(device, non_blocking=True))
         loss, _ = criterion(outputs, meta)

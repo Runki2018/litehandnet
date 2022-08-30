@@ -62,8 +62,8 @@ class TopDownCocoDataset(Kpt2dDataset):
         super().__init__(
             data_cfg,
             pipeline,
-            dataset_info=coco_info,
-            data_type=data_type)
+            data_type,
+            dataset_info=coco_info)
 
         self.use_gt_bbox = data_cfg['use_gt_bbox']
         self.bbox_file = data_cfg['bbox_file']

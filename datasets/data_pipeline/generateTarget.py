@@ -3,6 +3,34 @@ import copy
 import cv2
 import numpy as np
 
+
+class RegressionGenerateTarget:
+    def __init__(self, *args):
+        pass
+    def __call__(self, results):
+        """Generate the target heatmap."""
+        num_joints = results['ann_info']['num_joints']
+        w, h = results['ann_info']['image_size']
+        joints_3d = results['joints_3d']
+        joints_3d_visible = results['joints_3d_visible']
+        
+        target = np.zeros((num_joints, 2), dtype=np.float32)
+        target_weight = np.zeros((num_joints, 1), dtype=np.float32)
+        for i in range(num_joints):
+            target_weight[i] = joints_3d_visible[i, 0]
+            x, y = joints_3d[i, :2]
+            if x < 0 or x >= w or y < 0 or y >= h:
+                target_weight[i] = 0
+            if target_weight[i] > 0:
+                target[i, 0] =  x / w 
+                target[i, 1] = y / h
+        
+        results['target'] = target
+        results['target_weight'] = target_weight
+
+        return results
+
+
 class TopDownGenerateTarget:
     """Generate the target heatmap.
 
@@ -358,7 +386,7 @@ class SRHandNetGenerateTarget(TopDownGenerateTarget):
                     local_cfg, joints_3d, joints_3d_visible, self.sigma[i])
 
                 if self.pred_bbox:
-                    local_cfg['num_joints'] = 1
+                    local_cfg['num_joints'] = 1  # center points
                     region_map, region_weight = self._region_generate_target(
                         results['bbox'], local_cfg, self.sigma[i])
 
@@ -379,7 +407,7 @@ class SRHandNetGenerateTarget(TopDownGenerateTarget):
                         local_cfg, joints_3d, joints_3d_visible, self.sigma[i])
                     
                     if self.pred_bbox:
-                        local_cfg['num_joints'] = 1
+                        local_cfg['num_joints'] = 1  # center points
                         region_map, region_weight = self._region_generate_target(
                                 results['bbox'], local_cfg, self.sigma[i])
                         target_list.append(

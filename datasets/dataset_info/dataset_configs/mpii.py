@@ -133,9 +133,7 @@ dataset_info = dict(
         9:
         dict(link=('upper_neck', 'right_shoulder'), id=9, color=[255, 128, 0]),
         10:
-        dict(
-            link=('right_shoulder', 'right_elbow'), id=10, color=[255, 128,
-                                                                  0]),
+        dict(link=('right_shoulder', 'right_elbow'), id=10, color=[255, 128,0]),
         11:
         dict(link=('right_elbow', 'right_wrist'), id=11, color=[255, 128, 0]),
         12:

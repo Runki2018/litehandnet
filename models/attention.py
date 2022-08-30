@@ -213,8 +213,6 @@ class StageChannelAttention_fc(nn.Module):
         return out
 
 # --------------  Spatial and Channel Attention for Region maps : -----------------
-
-
 class SELayer(nn.Module):
     def __init__(self, channel, reduction=16):
         super(SELayer, self).__init__()

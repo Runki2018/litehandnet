@@ -8,6 +8,7 @@ from mmcv.utils import is_seq_of
 from typing import List, Iterable
 from torch.utils.data.dataset import Dataset, T_co, IterableDataset
 from datasets.data_pipeline import *
+from .data_pipeline.generateTarget import RegressionGenerateTarget
 from datasets.datasets import *
 
 
@@ -99,14 +100,17 @@ def build_dataset(cfg, data_type='train'):
     data_cfg = cfg.DATASET
     P = cfg.PIPELINE
     if cfg.MODEL.name == 'srhandnet':
-        GenerateTarget = SRHandNetGenerateTarget(cfg.MODEL.pred_bbox,
-                                                 P.sigma, P.kernel, P.target_type, P.encoding, P.unbiased_encoding)
+        GenerateTarget = SRHandNetGenerateTarget(cfg.MODEL.pred_bbox, P.sigma, P.kernel, P.target_type, 
+                                                 P.encoding, P.unbiased_encoding)
+    elif cfg.MODEL.name == 'atthandnet':
+        GenerateTarget = RegressionGenerateTarget()
     else:
         GenerateTarget = TopDownGenerateTarget(P.sigma, P.kernel, P.target_type, P.encoding, P.unbiased_encoding)
 
     if data_type == 'train':
         pipeline = Compose([
             LoadImageFromFile(),
+            HSVRandomAug(),
             # HandRandomFlip(P.flip_prob),
             TopDownRandomFlip(P.flip_prob),
             TopDownGetRandomScaleRotation(P.rot_factor, P.scale_factor, P.rot_prob),

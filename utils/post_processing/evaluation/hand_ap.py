@@ -1,6 +1,7 @@
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 from collections import OrderedDict
+import numpy as np
 
 
 def test_hand_ap(gt_json_file, pred_json_file):
@@ -32,3 +33,5 @@ def test_hand_ap(gt_json_file, pred_json_file):
                    'AR1', 'AR10', 'AR100', 'ARs', 'ARm', 'ARl']
     name_values=OrderedDict({k:v for k, v in zip(metric_name, coco_eval.stats)})
     return name_values
+
+

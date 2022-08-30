@@ -63,7 +63,7 @@ class TopDownAffine:
 
     def __call__(self, results):
         image_size = results['ann_info']['image_size']
-        
+
         img = results['img']
         joints_3d = results['joints_3d']
         joints_3d_visible = results['joints_3d_visible']

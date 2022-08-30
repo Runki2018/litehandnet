@@ -1,13 +1,56 @@
 import torch
 from torch import nn
-from torch.distributed.distributed_c10d import is_nccl_available
 import torch.nn.functional as F
-from torch.nn.modules import module, transformer
-from torch.nn.modules.activation import ReLU
-from torch.nn.modules.batchnorm import BatchNorm2d
-from torch.nn.modules.conv import Conv2d
-from models.layers import DWConv, channel_shuffle
+# from torch.distributed.distributed_c10d import is_nccl_available
+# from torch.nn.modules import module, transformer
+# from torch.nn.modules.activation import ReLU
+# from torch.nn.modules.batchnorm import BatchNorm2d
+# from torch.nn.modules.conv import Conv2d
 
+
+class DWConv(nn.Module):
+    """DepthwiseSeparableConvModul 深度可分离卷积"""
+    def __init__(self, in_channel, out_channel, stride=1, padding=1, dilation=1,mid_relu=True, last_relu=True, bias=False):
+        super().__init__()
+        self.depthwise_conv = nn.Sequential(
+            nn.Conv2d(in_channel, in_channel, 3, stride, padding, groups=in_channel, bias=bias, dilation=dilation),
+            nn.BatchNorm2d(in_channel))      
+        self.mid_relu = nn.ReLU() if mid_relu else nn.Identity()  # 正常的DWConv直接有ReLU
+        self.pointwise_conv = nn.Sequential(
+            nn.Conv2d(in_channel, out_channel, 1, 1, 0, bias=bias),
+            nn.BatchNorm2d(out_channel))
+        self.last_relu = nn.ReLU() if last_relu else nn.Identity()  # 正常的DWConv直接有ReLU
+        
+    def forward(self, x):
+        out = self.mid_relu(self.depthwise_conv(x)) 
+        out = self.last_relu(self.pointwise_conv(out)) 
+        return out
+
+def channel_shuffle(x, groups):
+    """Channel Shuffle operation.
+
+    This function enables cross-group information flow for multiple groups
+    convolution layers.
+
+    Args:
+        x (Tensor): The input tensor.
+        groups (int): The number of groups to divide the input tensor
+            in the channel dimension.
+
+    Returns:
+        Tensor: The output tensor after channel shuffle operation.
+    """
+
+    batch_size, num_channels, height, width = x.size()
+    assert (num_channels % groups == 0), ('num_channels should be '
+                                          'divisible by groups')
+    channels_per_group = num_channels // groups
+
+    x = x.view(batch_size, groups, channels_per_group, height, width)
+    x = torch.transpose(x, 1, 2).contiguous()
+    x = x.view(batch_size, -1, height, width)
+
+    return x
 
 
 class SpatialWeighting(nn.Module):
@@ -146,13 +189,10 @@ class StageModule(nn.Module):
     def forward(self, x):
         if self.in_branches == 1:
             return [self.layers[0](x[0])]
-        
         out = self.layers(x)
-
         if self.with_fuse:
             out_fuse = []
             for i in range(len(self.fuse_layers)):
-                # TODO : 这里 我把 j 改成从 1 开始，而不是0，否则会会加两次out[0] 但是模型的准确率会下降
                 y = out[0] if i == 0 else self.fuse_layers[i][0](out[0])
                 for j in range(self.in_branches):
                     if i == j:
@@ -239,16 +279,16 @@ class IterativeHead(nn.Module):
             last_x = s
         return y[::-1]
 
+
 class LiteHRNet(nn.Module):
-    # def __init__(self, cfg):
     def __init__(self, cfg):
         super().__init__()
         out_channel= cfg.MODEL.get('output_channel', cfg.DATASET.num_joints)
+        depth = cfg.MODEL.get('depth', 30)
 
-        self.stem = StemModule(
-            in_channels=3, stem_channels=32, 
-            out_channels=32, expand_ratio=1
-        )
+        self.stem = StemModule(in_channels=3, stem_channels=32,
+                               out_channels=32, expand_ratio=1)
+
         self.num_stages = 3
         self.with_head = True
         self.stages_spec = dict(
@@ -261,23 +301,27 @@ class LiteHRNet(nn.Module):
                     (40, 80),
                     (40, 80, 160),
                     (40, 80, 160, 320),
-                ))     
-        num_channels_last = [self.stem.out_channels]
+                ))
 
+        if depth == 18:
+            self.stages_spec['num_modules'] = (3, 4, 3)
+
+        num_channels_last = [self.stem.out_channels]
         for i in range(self.num_stages):
             num_channels = self.stages_spec['num_channels'][i]
             num_channels = [num_channels[i] for i in range(len(num_channels))]
             setattr(
-                self, 'transition{}'.format(i), self._make_transition_layer(num_channels_last, num_channels)
+                self, 'transition{}'.format(i),
+                self._make_transition_layer(num_channels_last, num_channels)
             )
             stage, num_channels_last = self._make_stage(
                 self.stages_spec, i, num_channels)
             setattr(self, 'stage{}'.format(i), stage)
-        
+
         if self.with_head:
             self.head_layer = IterativeHead(in_channels=num_channels_last)
         self.out_conv = nn.Conv2d(40, out_channel, 1, 1, 0)  # 需要自己加一个检测头
-    
+
     def _make_transition_layer(self, num_channels_pre_layer, num_channels_cur_layer):
         """将上一个stage的输出进行处理得到下一个stage的输入, 对于同一层次，如果通道数不同则变通道，如果为新层次，则下采样"""
         num_branches_cur = len(num_channels_cur_layer)
@@ -301,14 +345,14 @@ class LiteHRNet(nn.Module):
                     conv_downsample.append(DWConv(c_in, c_out, stride=2, mid_relu=False))
                 transition_layers.append(nn.Sequential(*conv_downsample))
         return nn.ModuleList(transition_layers)
-                    
+
     def _make_stage(self, stages_spec, stage_index, in_channels):
         num_modules = stages_spec['num_modules'][stage_index]
         num_branches = stages_spec['num_branches'][stage_index]
         num_blocks = stages_spec['num_blocks'][stage_index]
         reduce_ratio = stages_spec['reduce_ratios'][stage_index]
         with_fuse = stages_spec['with_fuse'][stage_index]
-        
+
         modules = []
         for i in range(num_modules):
             # multi_scale_output is only used last module
